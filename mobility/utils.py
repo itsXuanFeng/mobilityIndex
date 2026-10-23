@@ -22,6 +22,16 @@ def nan_smooth(x, n):
     return np.where(b > 0.5, a / np.maximum(b, 1e-9), np.nan)
 
 
+def best_threshold(x, y):
+    """threshold on x that maximises the balanced accuracy for the boolean labels y (NaN in x ignored)"""
+    x, y = np.asarray(x, float), np.asarray(y, bool)
+    ok = ~np.isnan(x)
+    x, y = x[ok], y[ok]
+    cands = np.unique(np.percentile(x, np.linspace(1, 99, 197)))
+    ba = [((x[y] > c).mean() + (x[~y] <= c).mean()) / 2 for c in cands]
+    return float(cands[int(np.argmax(ba))])
+
+
 def epoch_mean(x, n):
     """mean over consecutive epochs of n samples; NaN where less than half the samples are valid. Booleans give the
     fraction of True."""

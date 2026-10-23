@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import EPOCH_S, FPS, MOCAP_ACTIVE_SPEED
+from .config import EPOCH_S, FPS
+from .groundtruth import active_speed_thresholds
 from .radar.features import FEATURES
 from .utils import epoch_mean, log_level
 
@@ -51,8 +52,13 @@ def radar_states(session, threshold, active_feature='n_cells', energy_feature='p
                   extra=dict(active_feature=active_feature, energy_feature=energy_feature, threshold=threshold))
 
 
-def mocap_states(session, active_speed=MOCAP_ACTIVE_SPEED, window='window'):
-    """energy: mean squared joint speed; level: RMS joint speed (m/s); active above active_speed"""
+def mocap_states(session, active_speed=None, window='window'):
+    """energy: mean squared joint speed; level: RMS joint speed (m/s); active above active_speed. Default
+    active_speed: the threshold calibrated against the activity labels without this person
+    (scripts/calibrate_mocap_threshold.py)."""
+    if active_speed is None:
+        thr = active_speed_thresholds()
+        active_speed = thr.get(session.person, thr['ALL'])   # 'ALL': people outside the calibration
     n, t, valid = _epochs(session, window)
     energy = epoch_mean(session.mocap['ke'], n)
     level = np.sqrt(energy)

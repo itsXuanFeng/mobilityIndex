@@ -1,7 +1,10 @@
 """
-Radar vs MoCap: per epoch (AUC, and F1 with thresholds calibrated leave-one-recording-out) and per recording (the
-registered metrics: error for times, rank correlation for energy). Use leave-subjects-out for final numbers; with one recording per person, leave-one-recording-
-out is the same thing.
+Radar vs MoCap: per epoch (AUC, and F1 with thresholds calibrated leave-one-subject-out) and per recording (the
+registered metrics: error for times, rank correlation for energy).
+
+Generalisation: when recording r (person p) is evaluated, nothing calibrated on p is used. MoCap active / inactive is
+defined by gt_thresholds[p], the MoCap threshold calibrated against the activity labels without p, both for scoring r
+and for training the radar threshold on the other persons' recordings.
 """
 import numpy as np
 import pandas as pd
@@ -9,22 +12,24 @@ from scipy.stats import spearmanr
 from sklearn.metrics import f1_score, roc_auc_score
 
 from .config import EPOCH_S, FPS
+from .labels import label_class
 from .metrics import METRICS, compute_metrics
 from .states import feature_level, mocap_states, radar_states
-from .utils import epoch_mean
+from .utils import best_threshold, epoch_mean
 
 
-def epoch_table(sessions, features):
-    """one row per epoch with MoCap data: recording, label, MoCap energy / speed / active, distance to the radar,
-    window flags, and the epoch level of each radar feature"""
+def epoch_table(sessions, features, gt_thresholds):
+    """one row per epoch with MoCap data: recording, person, label, MoCap energy / speed, active (by the person's
+    own fold threshold), distance to the radar, window flags, and the epoch level of each radar feature"""
     n = int(round(EPOCH_S * FPS))
     out = []
     for s in sessions:
-        ms = mocap_states(s, window='has_mocap')
+        ms = mocap_states(s, active_speed=gt_thresholds[s.person], window='has_mocap')
         E = len(ms.t)
-        df = pd.DataFrame(dict(rec=s.name, t=ms.t, label=s.label_per_frame()[n // 2::n][:E], ke=ms.energy,
-                               speed=ms.level, active=ms.active, dist=epoch_mean(s.mocap['dist_cog'], n)[:E]))
-        for m in ('window', 'covered', 'no_caregiver'):
+        df = pd.DataFrame(dict(rec=s.name, person=s.person, t=ms.t, label=s.label_per_frame()[n // 2::n][:E],
+                               ke=ms.energy, speed=ms.level, active=ms.active,
+                               dist=epoch_mean(s.mocap['dist_cog'], n)[:E]))
+        for m in ('window', 'covered', 'in_script', 'no_caregiver'):
             df[m] = epoch_mean(s.masks[m], n)[:E] >= 0.5
         for f in features:
             df[f] = feature_level(s, f, n)[:E]
@@ -32,20 +37,29 @@ def epoch_table(sessions, features):
     return pd.concat(out, ignore_index=True)
 
 
-def best_threshold(x, y):
-    """threshold on x maximising the balanced accuracy for the labels y"""
-    ok = ~np.isnan(x)
-    x, y = x[ok], y[ok]
-    cands = np.unique(np.percentile(x, np.linspace(1, 99, 197)))
-    ba = [((x[y] > c).mean() + (x[~y] <= c).mean()) / 2 for c in cands]
-    return float(cands[int(np.argmax(ba))])
+def epoch_pairs(session, radar_threshold, mocap_threshold, active_feature='n_cells', energy_feature='p_r4'):
+    """per 1 s epoch over the whole recording, the Category 1 states side by side: movement energy and active call
+    of the radar and of MoCap, whether the epoch is evaluated, its label and label class, distance to the radar"""
+    n = int(round(EPOCH_S * FPS))
+    rs = radar_states(session, radar_threshold, active_feature, energy_feature)
+    ms = mocap_states(session, mocap_threshold)
+    E = len(rs.t)
+    label = session.label_per_frame()[n // 2::n][:E]
+    return pd.DataFrame(dict(t=rs.t, radar_energy=rs.energy, mocap_energy=ms.energy, radar_active=rs.active,
+                             mocap_active=ms.active, evaluated=rs.valid & ms.valid, label=label,
+                             label_class=[label_class(x) if x else None for x in label],
+                             dist=epoch_mean(session.mocap['dist_cog'], n)[:E]))
 
 
-def loro_thresholds(table, feature):
-    """{recording: threshold calibrated on all other recordings}"""
+def loso_thresholds(table, feature, gt_thresholds):
+    """{recording: radar threshold calibrated on the recordings of all other persons}, with MoCap active defined by
+    the evaluated person's fold threshold"""
     w = table[table.window]
-    return {r: best_threshold(w.loc[w.rec != r, feature].values, w.loc[w.rec != r, 'active'].values)
-            for r in w.rec.unique()}
+    out = {}
+    for r, person in w[['rec', 'person']].drop_duplicates().itertuples(index=False):
+        train = w[w.person != person]
+        out[r] = best_threshold(train[feature].values, (train.speed > gt_thresholds[person]).values)
+    return out
 
 
 def epoch_scores(table, feature, thresholds):
@@ -60,11 +74,12 @@ def epoch_scores(table, feature, thresholds):
     return pd.DataFrame(rows)
 
 
-def metric_table(sessions, thresholds, category=None, **radar_kw):
+def metric_table(sessions, thresholds, gt_thresholds, category=None, **radar_kw):
     """per recording and metric: radar value (with that recording's threshold) and MoCap value"""
     rows = []
     for s in sessions:
-        rs, ms = radar_states(s, thresholds[s.name], **radar_kw), mocap_states(s)
+        rs = radar_states(s, thresholds[s.name], **radar_kw)
+        ms = mocap_states(s, active_speed=gt_thresholds[s.person])
         rs.valid = ms.valid = rs.valid & ms.valid          # the same epochs on both sides
         rad, moc = compute_metrics(rs, category), compute_metrics(ms, category)
         for k in rad:

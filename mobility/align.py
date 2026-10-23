@@ -33,6 +33,8 @@ def fine_offset(radar_power, capture_start, mocap, search=ALIGN_SEARCH_S, step=0
         ok = ~np.isnan(m) & ~np.isnan(rx)
         if ok.sum() > 10 * FPS:
             corrs[i] = np.corrcoef(rx[ok], m[ok])[0, 1]
+    if np.all(np.isnan(corrs)):     # MoCap and radar overlap too little to align
+        return dict(offset_s=0.0, corr=np.nan, margin=np.nan, curve=(offsets, corrs))
     best = int(np.nanargmax(corrs))
     far = np.abs(offsets - offsets[best]) > 2
     return dict(offset_s=float(offsets[best]), corr=float(corrs[best]),

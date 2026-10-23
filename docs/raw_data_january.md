@@ -74,8 +74,12 @@ The reader skips every frame that is not completely on disk, including frames cu
 
 The DCA1000 fills packets lost during the capture with zeros and counts them in `Raw_LogFile.csv` ("Number of zero filled packets"). **76 of the 156 January recordings have lost packets:** 18–486 per recording, with a median of about 60. person_10/scenario_2 has the most (486), followed by person_3/scenario_1 (474) and person_10/scenario_1 (275).
 
-A packet is 1,456 bytes and a frame about 844 packets, so a lost packet zeroes part of a frame rather than a whole one:
-- **Frames that are entirely zero** become NaN.
-- **Frames with only a few zero-filled packets** keep finite but distorted values. They are not marked.
+A packet is 1,456 bytes and a frame about 844 packets, so a lost packet zeroes part of a frame rather than a whole one. **Packets are lost in bursts:** person_10/scenario_2 logs 486 lost packets in 11 out-of-sequence events, and they damage only 10 frames.
 
-A gap in the samples spreads energy over many range and Doppler bins, so it could look like a short burst of movement. This has not been checked yet; if spurious one-frame activity shows up, compare it with these recordings first.
+A damaged frame looks like a burst of movement: the gap in the samples spreads energy over all range and Doppler bins. In person_10/scenario_2 the damaged frames had up to 138 times the moving power of their neighbours, and thousands of cells above the floor where the neighbouring frames had none.
+
+The radar pass therefore turns these frames into NaN rows (`mobility/radar/cube.py`):
+- **Entirely zero frames** become NaN.
+- **Damaged frames** become NaN too: a frame is damaged when it has at least 16 consecutive samples with I = Q = 0. A lost packet zero-fills 364 samples in a row; real ADC data practically never has that many exact zeros in a row.
+
+Each recording's `pass_info.json` lists the damaged frames next to the number of lost packets from the log, as a cross-check. Recordings without lost packets have no damaged frames (e.g. person_1/scenario_1).

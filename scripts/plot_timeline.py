@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.config import OUTPUT_ROOT  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
-from mobility.plots import timeline  # noqa: E402
+from mobility.plots.diagnostic import timeline  # noqa: E402
 from mobility.session import load_session  # noqa: E402
 
 if __name__ == '__main__':

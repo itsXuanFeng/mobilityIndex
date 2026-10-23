@@ -41,6 +41,12 @@ def capture_times(person, scenario):
     return parse('Capture start time'), parse('Capture end time')
 
 
+def lost_packets(person, scenario):
+    """packets the DCA1000 lost and filled with zeros during the capture, from its log"""
+    with open(f'{FMCW_ROOT}/{person}/{scenario}/test2x_1_Raw_LogFile.csv') as fp:
+        return int(re.search(r'Number of zero filled packets - (\d+)', fp.read()).group(1))
+
+
 def labels(person, scenario):
     """scripted activities: label, start, end (epoch s, UTC), as recorded by the operator"""
     df = pd.read_csv(f'{LABEL_ROOT}/{person}/{scenario}/timestamps.csv')

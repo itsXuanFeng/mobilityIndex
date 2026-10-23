@@ -1,13 +1,12 @@
-"""Diagnostic plots."""
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+"""Diagnostic timeline: raw radar maps next to MoCap, to check alignment, geometry and features."""
+import matplotlib.pyplot as plt
+import numpy as np
 
-from .config import FPS, MOCAP_ACTIVE_SPEED, RANGE_AXIS, VELOCITY_AXIS  # noqa: E402
-from .radar.cube import load_cube  # noqa: E402
-from .radar.features import MOVING, noise_floor  # noqa: E402
-from .utils import log_level, nan_smooth  # noqa: E402
+from ..config import FPS, RANGE_AXIS, VELOCITY_AXIS
+from ..groundtruth import active_speed_thresholds
+from ..radar.cube import load_cube
+from ..radar.features import MOVING, noise_floor
+from ..utils import log_level, nan_smooth
 
 
 def _maps(cube, step=5, chunk=2000):
@@ -42,7 +41,10 @@ def timeline(session, path, features=('p_sub', 'p_r4'), count_feature='n_cells')
         ax[3].plot(tt, s.mocap['vr_cog'], 'c', lw=0.6, label='MoCap CoG radial speed (+ = away)')
     ax[0].fill_between(tt, 0, 1, where=s.masks['has_mocap'] & ~s.masks['window'], color='grey', alpha=0.4,
                        transform=ax[0].get_xaxis_transform(), label='MoCap, outside the evaluation window')
-    ax[0].axhline(MOCAP_ACTIVE_SPEED, color='k', ls=':', lw=0.8)
+    try:
+        ax[0].axhline(active_speed_thresholds()[s.person], color='k', ls=':', lw=0.8, label='MoCap active threshold')
+    except (FileNotFoundError, KeyError):
+        pass
     ax[0].set_ylim(0, 1.5)
     ax[0].set_title(f'{s.name}; offset {s.alignment["offset_s"]:+.2f} s after the logged capture start; '
                     'numbers = label rows')

@@ -13,6 +13,12 @@ LABEL_ROOT = f'{CAMPAIGN}/timestamps'
 
 # everything this package writes: radar cubes, cached features, evaluation tables, plots
 OUTPUT_ROOT = os.environ.get('MOBILITY_OUTPUT', os.path.join(REPO, 'output'))
+GROUNDTRUTH_DIR = os.path.join(OUTPUT_ROOT, 'groundtruth')   # MoCap active threshold calibration
+
+
+def recording_dir(person, scenario):
+    """per-recording outputs: cube, cached features, MoCap signals, alignment"""
+    return os.path.join(OUTPUT_ROOT, person, scenario)
 
 # ---- radar (mobility/io/config.mmwave.json) ----
 FPS = 20                     # frames per second
@@ -36,5 +42,7 @@ COVERAGE_RADIUS = 5.0             # subject CoG farther than this from the radar
 
 # ---- epochs and ground truth ----
 EPOCH_S = 1.0
-MOCAP_ACTIVE_SPEED = 0.15         # MoCap: an epoch is active if the RMS joint speed exceeds this (m/s)
+# MoCap active / inactive: RMS joint speed above a threshold calibrated against the activity labels, leaving the
+# person out (scripts/calibrate_mocap_threshold.py, mobility/labels.py); not set by hand
+LABEL_MARGIN_S = 2.0              # time between labels counts as waiting (inactive) only this far from any label
 ALIGN_SEARCH_S = (-15.0, 15.0)    # fine time offset searched around the logged capture start

@@ -37,13 +37,14 @@ mobility/                  the package
     dsp.py                 range-Doppler power of all 12 virtual channels (GPU)
     cube.py                one pass over a raw recording -> cube (the only step that reads raw data)
     features.py            per-frame features, @feature registry
-  groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed, distance to the radar
+  groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed; active threshold calibration
+  labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
   align.py                 time offset radar <-> MoCap, radar position fit
   session.py               one recording: aligned features + MoCap + labels + evaluation masks (cached)
   states.py                per-epoch States from the radar or from MoCap
   metrics/                 @metric registry; category1.py, category2.py, category3.py
   evaluation.py            per-epoch scores, leave-one-recording-out thresholds, metric agreement
-  plots.py                 diagnostic timeline
+  plots/                   figures: agreement.py (radar vs MoCap over time), diagnostic.py, style.py
 scripts/                   command-line entry points (below)
 docs/                      write-ups per category; raw data format and missing data (raw_data_january.md)
 output/                    everything generated (git-ignored; MOBILITY_OUTPUT overrides the location)
@@ -58,8 +59,12 @@ PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3
 
 # 1. cubes: reads raw data, ~3 min per recording, network-bound; pick a free GPU
 CUDA_VISIBLE_DEVICES=0 $PY scripts/radar_pass.py --only person_1/scenario_1 person_5/scenario_3
-# 2. Category 1 evaluation on every recording that has a cube
+# 2. MoCap active threshold, calibrated against the activity labels (MoCap + labels only, all recordings)
+$PY scripts/calibrate_mocap_threshold.py
+# 3. Category 1 evaluation on every recording that has a cube
 $PY scripts/evaluate_category1.py
+# radar vs MoCap over time (after step 3)
+$PY scripts/plot_agreement.py --only person_10/scenario_2
 # diagnostics
 $PY scripts/plot_timeline.py person_1/scenario_1
 $PY scripts/fit_radar_position.py --only person_1/scenario_1 person_5/scenario_3 person_10/scenario_2
@@ -69,10 +74,12 @@ Outputs, under `output/`:
 
 | Path | Content |
 |---|---|
-| `<person>/<scenario>/rd12_db.npy` | cube, float16 dB, (T, 128 range, 128 Doppler), ~360 MB |
-| `<person>/<scenario>/features.npz`, `mocap_50hz.npz`, `alignment.json` | session cache |
+| `<person>/<scenario>/rd12_db.npy` | cube, float16 dB, (T, 128 range, 128 Doppler), ~360 MB; NaN rows for frames missing, all-zero or damaged by lost packets |
+| `<person>/<scenario>/pass_info.json` | radar pass: missing, all-zero and damaged frames, lost packets from the capture log, timing |
+| `<person>/<scenario>/features.npz`, `subject.json`, `mocap_50hz.npz`, `alignment.json` | session cache |
+| `groundtruth/mocap_active_threshold.csv` | MoCap active threshold per left-out person (and `ALL`) |
 | `category1/*.csv` | evaluation tables |
-| `plots/` | timelines |
+| `plots/agreement/`, `plots/` | radar vs MoCap over time; diagnostic timelines |
 
 ## Extending
 

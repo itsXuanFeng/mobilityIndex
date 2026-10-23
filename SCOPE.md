@@ -56,7 +56,7 @@ Radar products, all from one pass:
 - **Signal:** Doppler profile (1) with the noise floor subtracted; ignore |v| < ~0.1 m/s to exclude residual clutter and breathing.
 - **Distance correction:** received power falls steeply with distance, about 20 dB between 1.4 m and 4.5 m. Correct it with the range from (2), or use measures that don't depend on signal strength, such as Doppler spread or the number of bins above the floor.
 - **Active/inactive:** threshold per epoch (e.g. 1 s), calibrated against MoCap.
-- **Ground truth:** MoCap joint speeds per epoch: a kinetic-energy proxy, and a speed threshold for active.
+- **Ground truth:** MoCap joint speeds per epoch: a kinetic-energy proxy, and a speed threshold for active, calibrated against the activity labels without the evaluated person (active = whole-body movement; arm-only tasks are inactive).
 
 ### Category 2: activity bout structure
 *Number of bouts, mean and variance of bout duration, fragmentation index*

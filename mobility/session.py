@@ -2,8 +2,13 @@
 One recording, ready for metrics: per radar frame, the radar features, the aligned MoCap signals, the labels and the
 masks of the evaluation window. Built from the cube (mobility.radar.cube), cached in OUTPUT_ROOT/<person>/<scenario>/:
     features.npz          radar features (missing ones are added when new features are registered)
-    mocap_50hz.npz        MoCap signals of the subject's track (recomputed when RADAR_XYZ changes)
-    alignment.json        MoCap shot and track, time offset of radar frame 0
+Features and alignment are recomputed when the cube is newer than them.
+    subject.json          MoCap shot and subject track         (mobility.groundtruth)
+    mocap_50hz.npz        MoCap signals of the subject's track (mobility.groundtruth)
+    alignment.json        time offset of radar frame 0
+
+Evaluation window ('window' mask): MoCap present, subject within radar coverage, inside the scripted period (no
+operator setting up or clearing the room), and outside the caregiver visit.
 """
 import json
 import os
@@ -13,11 +18,11 @@ import numpy as np
 import pandas as pd
 
 from .align import fine_offset
-from .config import COVERAGE_RADIUS, FPS, RADAR_XYZ, ROOM_MAX_X
-from .groundtruth import mocap_signals, to_frames
-from .io.mocap import shot_for, subject_track
+from .config import COVERAGE_RADIUS, FPS, ROOM_MAX_X, recording_dir
+from .groundtruth import mocap_50hz, subject, to_frames
 from .io.recordings import capture_times, labels
-from .radar.cube import load_cube, recording_dir
+from .labels import caregiver_period, script_period
+from .radar.cube import cube_path, load_cube
 from .radar.features import FEATURES, compute_features
 
 
@@ -44,10 +49,15 @@ class Session:
         return lab
 
 
+def _fresh(path, person, scenario):
+    """the cached file exists and is newer than the cube it was computed from"""
+    return os.path.exists(path) and os.path.getmtime(path) > os.path.getmtime(cube_path(person, scenario))
+
+
 def _features(person, scenario, overwrite):
     path = os.path.join(recording_dir(person, scenario), 'features.npz')
     have = {}
-    if os.path.exists(path) and not overwrite:
+    if _fresh(path, person, scenario) and not overwrite:
         have = dict(np.load(path))
     missing = [n for n in FEATURES if n not in have]
     if missing:
@@ -58,28 +68,17 @@ def _features(person, scenario, overwrite):
     return {k: v for k, v in have.items() if not k.startswith('_')}
 
 
-def _mocap(person, scenario, track, overwrite):
-    path = os.path.join(recording_dir(person, scenario), 'mocap_50hz.npz')
-    if os.path.exists(path) and not overwrite:
-        d = dict(np.load(path))
-        if tuple(d.pop('_radar_xyz')) == tuple(RADAR_XYZ) and str(d.pop('_track')) == track:
-            return d
-    d = mocap_signals(track, RADAR_XYZ)
-    np.savez(path, _radar_xyz=np.array(RADAR_XYZ), _track=track, **d)
-    return d
-
-
 def _alignment(person, scenario, overwrite):
     path = os.path.join(recording_dir(person, scenario), 'alignment.json')
-    if os.path.exists(path) and not overwrite:
+    if _fresh(path, person, scenario) and not overwrite:
         with open(path) as fp:
-            return json.load(fp)
-    shot = shot_for(person, scenario)
-    al = dict(capture_start=capture_times(person, scenario)[0], shot=None, track=None, offset_s=0.0)
-    if shot is not None:
-        al.update(shot=shot['shot'], track=subject_track(shot))
-        power = _features(person, scenario, False)['p_sub']
-        fit = fine_offset(power, al['capture_start'], _mocap(person, scenario, al['track'], False))
+            al = json.load(fp)
+        if 'shot' not in al:          # older caches also held the MoCap shot and track
+            return al
+    al = dict(capture_start=capture_times(person, scenario)[0], offset_s=0.0)
+    sig = mocap_50hz(person, scenario, overwrite)
+    if sig is not None:
+        fit = fine_offset(_features(person, scenario, False)['p_sub'], al['capture_start'], sig)
         al.update({k: v for k, v in fit.items() if k != 'curve'})
     with open(path, 'w') as fp:
         json.dump(al, fp, indent=1)
@@ -88,19 +87,20 @@ def _alignment(person, scenario, overwrite):
 
 def load_session(person, scenario, overwrite=False):
     al = _alignment(person, scenario, overwrite)
+    al.update(subject(person, scenario))
     radar = _features(person, scenario, overwrite)
     T = len(next(iter(radar.values())))
     t = al['capture_start'] + al['offset_s'] + np.arange(T) / FPS
     lb = labels(person, scenario)
-    if al['track']:
-        gt = to_frames(_mocap(person, scenario, al['track'], overwrite), t)
-    else:
-        gt = {}
+    sig = mocap_50hz(person, scenario)
+    gt = to_frames(sig, t) if sig is not None else {}
     has_mocap = ~np.isnan(gt['ke']) if gt else np.zeros(T, bool)
     covered = (gt['dist_cog'] < COVERAGE_RADIUS) & (gt['cog_x'] < ROOM_MAX_X) if gt else np.zeros(T, bool)
-    care = lb[lb.label.str.contains('caregiver', case=False)]
-    no_caregiver = ~((t >= care.start.min()) & (t <= care.end.max())) if len(care) else np.ones(T, bool)
+    s0, s1 = script_period(lb)
+    in_script = (t >= s0) & (t <= s1)
+    care = caregiver_period(lb)
+    no_caregiver = ~((t >= care[0]) & (t <= care[1])) if care else np.ones(T, bool)
     no_data = np.isnan(radar['p_sub'])
-    masks = dict(has_mocap=has_mocap, covered=covered, no_caregiver=no_caregiver,
-                 window=has_mocap & covered & no_caregiver & ~no_data)
+    masks = dict(has_mocap=has_mocap, covered=covered, in_script=in_script, no_caregiver=no_caregiver,
+                 window=has_mocap & covered & in_script & no_caregiver & ~no_data)
     return Session(person, scenario, t, radar, gt, lb, masks, al)
