@@ -2,6 +2,7 @@
 One recording, ready for metrics: per radar frame, the radar features, the aligned MoCap signals, the labels and the
 masks of the evaluation window. Built from the cube (mobility.radar.cube), cached in OUTPUT_ROOT/<person>/<scenario>/:
     features.npz          radar features (missing ones are added when new features are registered)
+    angle_features.npz    the person's height and position per frame, from the angle pass (when points.npz exists)
 Features and alignment are recomputed when the cube is newer than them.
     subject.json          MoCap shot and subject track         (mobility.groundtruth)
     mocap_50hz.npz        MoCap signals of the subject's track (mobility.groundtruth)
@@ -22,6 +23,7 @@ from .config import COVERAGE_RADIUS, FPS, ROOM_MAX_X, recording_dir
 from .groundtruth import mocap_50hz, subject, to_frames
 from .io.recordings import capture_times, labels
 from .labels import caregiver_period, script_period
+from .radar.angle import ANGLE_FEATURES, frame_features
 from .radar.cube import cube_path, load_cube
 from .radar.features import FEATURES, compute_features
 
@@ -68,6 +70,29 @@ def _features(person, scenario, overwrite):
     return {k: v for k, v in have.items() if not k.startswith('_')}
 
 
+def _angle_features(person, scenario, n_frames, overwrite):
+    """per-frame features of the person from the angle-pass points (mobility.radar.angle.frame_features), cached in
+    angle_features.npz; {} when the recording has no points.npz (scripts/angle_pass.py)"""
+    from .radar.points import load_points, points_path
+    src = points_path(person, scenario)
+    if not os.path.exists(src):
+        return {}
+    path = os.path.join(recording_dir(person, scenario), 'angle_features.npz')
+    if os.path.exists(path) and os.path.getmtime(path) > os.path.getmtime(src) and not overwrite:
+        have = dict(np.load(path))
+        if set(ANGLE_FEATURES) <= set(have) and all(len(v) == n_frames for v in have.values()):
+            return have
+    have = frame_features(load_points(person, scenario), noise_floor(person, scenario), n_frames)
+    np.savez(path, **have)
+    return have
+
+
+def noise_floor(person, scenario):
+    """(range, Doppler) noise floor of the recording in dB, the one its features use (computed from the cube)"""
+    _features(person, scenario, False)
+    return np.load(os.path.join(recording_dir(person, scenario), 'features.npz'))['_floor_db']
+
+
 def _alignment(person, scenario, overwrite):
     path = os.path.join(recording_dir(person, scenario), 'alignment.json')
     if _fresh(path, person, scenario) and not overwrite:
@@ -90,6 +115,7 @@ def load_session(person, scenario, overwrite=False):
     al.update(subject(person, scenario))
     radar = _features(person, scenario, overwrite)
     T = len(next(iter(radar.values())))
+    radar.update(_angle_features(person, scenario, T, overwrite))
     t = al['capture_start'] + al['offset_s'] + np.arange(T) / FPS
     lb = labels(person, scenario)
     sig = mocap_50hz(person, scenario)

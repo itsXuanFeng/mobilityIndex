@@ -19,15 +19,20 @@ class RangeDoppler:
         self.scale_doppler = 1 / self.w_doppler.sum()
         self.pad = (N_DOPPLER - n_loops) // 2
 
-    def power(self, frames):
+    def spectrum(self, frames):
         """
         :param frames: (n, loops, tx, rx, samples) complex64, numpy or torch
-        :return: (n, tx, rx, N_RANGE, N_DOPPLER) power (linear), Doppler fftshifted (zero velocity at N_DOPPLER // 2)
+        :return: (n, tx, rx, N_RANGE, N_DOPPLER) complex range-Doppler spectrum of every virtual channel, Doppler
+                 fftshifted (zero velocity at N_DOPPLER // 2). Its phases across the 12 channels carry the angle.
         """
         x = torch.as_tensor(frames, device=self.device)[..., 1:] * self.w_range
         r = torch.fft.fft(x, RANGE_FFT, dim=-1)[..., :N_RANGE] * self.scale_range     # (n, loops, tx, rx, range)
         r = r - r.mean(dim=1, keepdim=True)                                            # static reflections
         r = r * self.w_doppler[None, :, None, None, None]
         r = torch.nn.functional.pad(r.permute(0, 2, 3, 4, 1), (self.pad, self.pad))   # (n, tx, rx, range, loops)
-        d = torch.fft.fftshift(torch.fft.fft(r, dim=-1), dim=-1) * self.scale_doppler
+        return torch.fft.fftshift(torch.fft.fft(r, dim=-1), dim=-1) * self.scale_doppler
+
+    def power(self, frames):
+        """(n, tx, rx, N_RANGE, N_DOPPLER) power (linear) of spectrum()"""
+        d = self.spectrum(frames)
         return d.real ** 2 + d.imag ** 2

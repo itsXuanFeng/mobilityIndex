@@ -37,6 +37,11 @@ ABOVE_FLOOR_DB = 6           # a cell "is on" when this far above its floor
 
 # ---- geometry, in the MoCap frame (metres, Y up) ----
 RADAR_XYZ = (-3.25, 2.45, 0.40)   # fitted with scripts/fit_radar_position.py; the floor plan agrees in x and z
+# orientation of the virtual array's axes (mobility.radar.angle): fitted with scripts/fit_radar_orientation.py on the
+# 6 development recordings, one per layout (each alone within +-1 deg; never mirrored): the array axes a, b lie along
+# MoCap x, z
+RADAR_YAW_DEG = 0.0
+RADAR_MIRROR = False
 ROOM_MAX_X = 1.0                  # x beyond this is the corridor
 COVERAGE_RADIUS = 5.0             # subject CoG farther than this from the radar is outside radar coverage
 

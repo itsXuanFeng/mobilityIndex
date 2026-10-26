@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..config import ABOVE_FLOOR_DB, FLOOR_PERCENTILE, MIN_RANGE, MIN_SPEED, RANGE_AXIS, VELOCITY_AXIS
+from ..config import (ABOVE_FLOOR_DB, COVERAGE_RADIUS, FLOOR_PERCENTILE, MIN_RANGE, MIN_SPEED, RANGE_AXIS,
+                      VELOCITY_AXIS)
 
 
 @dataclass
@@ -87,12 +88,14 @@ def p_sub(c):
     return c.excess.sum((1, 2))
 
 
-R4 = np.maximum(RANGE_AXIS, 0.5)[:, None] ** 4
+# range^4 weight, zero beyond the radar coverage: there the subject never is, and the weight would amplify noise
+R4 = (np.maximum(RANGE_AXIS, 0.5) ** 4 * (RANGE_AXIS <= COVERAGE_RADIUS))[:, None]
 
 
 @feature('p_r4')
 def p_r4(c):
-    """p_sub with each range bin weighted by range^4 (received power falls ~1/r^4): distance-corrected movement energy"""
+    """p_sub within COVERAGE_RADIUS, each range bin weighted by range^4 (received power falls ~1/r^4):
+    distance-corrected movement energy"""
     return (c.excess * R4).sum((1, 2))
 
 
@@ -109,7 +112,7 @@ def v_rms(c):
     return np.sqrt((dop * VELOCITY_AXIS ** 2).sum(1) / np.maximum(dop.sum(1), 1e-30))
 
 
-# ---------------------------------------------------------------- direction and height (Category 3, alignment checks)
+# ---------------------------------------------------------------- direction, height and speed (Category 3, alignment)
 
 @feature('v_centroid', log=False)
 def v_centroid(c):
@@ -127,3 +130,14 @@ def r_near(c, db_above=12, min_cells=2, min_total=6):
     first = np.argmax(per_range >= min_cells, axis=1)
     ok = (per_range.sum(1) >= min_total) & (per_range.max(1) >= min_cells)
     return np.where(ok, RANGE_AXIS[first], np.nan)
+
+
+@feature('v_peak', log=False)
+def v_peak(c, db_above=12, min_total=6):
+    """largest |radial velocity| (m/s) of the cells db_above dB above the floor, the same clearly moving cells as
+    r_near; NaN when fewer than min_total cells are. The first version's peak Doppler (Category 3): it reads high,
+    because strong reflections leak power into neighbouring Doppler bins; the main method uses the angle features
+    v_q900 ... v_q995 instead"""
+    strong = (c.db > c.floor_db + db_above) & MOVING
+    vmax = (strong * np.abs(VELOCITY_AXIS)).max((1, 2))
+    return np.where(strong.sum((1, 2)) >= min_total, vmax, np.nan)

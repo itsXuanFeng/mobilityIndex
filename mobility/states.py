@@ -2,8 +2,8 @@
 Per-epoch states, from the radar or from MoCap, in the same form, so every metric is one rule applied to both.
 
 Category 1 and 2 need: movement energy, activity level, active / inactive.
-Category 3 will add posture (lying / sitting / standing) and transition events: add fields here and fill them in both
-builders.
+Category 3 needs the posture per epoch (`posture`, codes of mobility.posture) and the postural transitions: events, not
+epochs (mobility.transitions). mobility.evaluation.metric_table sets both.
 """
 from dataclasses import dataclass, field
 
@@ -24,7 +24,9 @@ class States:
     active: np.ndarray       # (E,) bool
     valid: np.ndarray        # (E,) bool: epoch inside the evaluation window
     epoch_s: float = EPOCH_S
-    extra: dict = field(default_factory=dict)   # anything else a metric needs (e.g. labels, posture)
+    posture: np.ndarray = None               # (E,) posture code per epoch (mobility.posture), Category 3
+    transitions: object = None               # pd.DataFrame of postural transitions (mobility.transitions), Category 3
+    extra: dict = field(default_factory=dict)   # anything else a metric needs (e.g. the bout rule)
 
 
 def _epochs(session, window):

@@ -60,3 +60,24 @@ def fit_radar_position(ranges, joints, heights=np.arange(2.3, 3.31, 0.05), xs=np
     err, xyz = best
     d = np.linalg.norm(joints - xyz, axis=-1).min(1)
     return dict(xyz=xyz, median_abs_err=float(err), bias=float(np.median(ranges - d)))
+
+
+def fit_radar_orientation(uv, target, yaws=np.arange(0, 360, 0.5)):
+    """
+    rotation of the radar's array axes about the vertical, and whether they are mirrored: the transform taking the
+    measured direction cosines (u, v) onto the horizontal direction cosines of the MoCap target (along MoCap x, z)
+    with the smallest median error
+    :param uv: (N, 2) measured (u, v) along the array axes (mobility.radar.angle)
+    :param target: (N, 2) MoCap direction cosines along x and z of the matching joint, seen from the radar
+    :return: dict(yaw_deg, mirror, median_err = median distance in direction cosines)
+    """
+    best = None
+    for mirror in (False, True):
+        m = uv * [1, -1 if mirror else 1]
+        for yaw in yaws:
+            c, s = np.cos(np.deg2rad(yaw)), np.sin(np.deg2rad(yaw))
+            room = np.c_[m[:, 0] * c - m[:, 1] * s, m[:, 0] * s + m[:, 1] * c]
+            err = np.median(np.linalg.norm(room - target, axis=1))
+            if best is None or err < best[0]:
+                best = (err, float(yaw), mirror)
+    return dict(median_err=float(best[0]), yaw_deg=best[1], mirror=best[2])

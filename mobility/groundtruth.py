@@ -7,8 +7,8 @@ MoCap ground truth.
 - The active threshold on RMS joint speed: calibrated against the label classes, leaving the evaluated person out
   (calibrate_active_speed, scripts/calibrate_mocap_threshold.py). Nothing is set by hand.
 
-To add a ground-truth signal (e.g. trunk angle for posture, Category 3), add it to the dict in mocap_signals; it is
-carried to radar frames by to_frames automatically (delete the cached mocap_50hz.npz files, or load with overwrite).
+To add a ground-truth signal, add it to the dict in mocap_signals and its name to SIGNALS; it is carried to radar frames
+by to_frames automatically, and cached files without it are recomputed.
 """
 import json
 import os
@@ -24,6 +24,7 @@ from .labels import ACTIVE, INACTIVE, time_classes
 from .utils import best_threshold
 
 THRESHOLD_FILE = os.path.join(GROUNDTRUTH_DIR, 'mocap_active_threshold.csv')
+SIGNALS = ('ke', 'vr2', 'vr_cog', 'vr_max', 'dist_cog', 'cog_x', 'cog_z', 'head_y', 'hip_y', 'knee_y', 'trunk_deg', 'knee_deg')
 
 
 def joint_kinematics(t, pos):
@@ -44,16 +45,36 @@ def mocap_signals(track_csv, radar_xyz=RADAR_XYZ):
         ke         mean squared joint speed (m^2/s^2): whole-body kinetic-energy proxy
         vr2        mean squared joint speed along the line to the radar: what the radar can see
         vr_cog     signed radial speed of the centre of gravity (+ = away from the radar)
+        vr_max     largest |radial speed| over the joints (m/s): what the peak Doppler sees (Category 3)
         dist_cog   distance radar - centre of gravity (m)
         cog_x, cog_z, head_y   position (m)
+        hip_y      height of the pelvis (mean of the two hips, m)                    posture (Category 3)
+        knee_y     height of the knees (mean of both, m): near the floor when kneeling
+        trunk_deg  angle of the trunk (hips -> neck) from vertical: 0 upright, 90 lying
+        knee_deg   knee angle (hip-knee-ankle, mean of both sides): 180 straight
     """
     t, pos = load_track(track_csv)
     grid, p, v = joint_kinematics(t, pos)
     u = p - np.asarray(radar_xyz)
     dist = np.linalg.norm(u, axis=-1)
     vr = (v * u).sum(-1) / dist
-    return dict(t=grid, ke=(v ** 2).sum(-1).mean(-1), vr2=(vr ** 2).mean(-1), vr_cog=vr[:, 0], dist_cog=dist[:, 0],
-                cog_x=p[:, 0, 0], cog_z=p[:, 0, 2], head_y=p[:, JOINTS.index('HeadPosition'), 1])
+    j = {name: p[:, i] for i, name in enumerate(JOINTS)}
+    hip = (j['LHipPositions'] + j['RHipPositions']) / 2
+    trunk = j['NeckPosition'] - hip
+    return dict(t=grid, ke=(v ** 2).sum(-1).mean(-1), vr2=(vr ** 2).mean(-1), vr_cog=vr[:, 0],
+                vr_max=np.abs(vr).max(-1), dist_cog=dist[:, 0], cog_x=p[:, 0, 0], cog_z=p[:, 0, 2],
+                head_y=j['HeadPosition'][:, 1], hip_y=hip[:, 1],
+                knee_y=(j['LKneePositions'][:, 1] + j['RKneePositions'][:, 1]) / 2,
+                trunk_deg=np.degrees(np.arccos(np.clip(trunk[:, 1] / np.linalg.norm(trunk, axis=-1), -1, 1))),
+                knee_deg=(_angle(j['LHipPositions'], j['LKneePositions'], j['LAnklePositions'])
+                          + _angle(j['RHipPositions'], j['RKneePositions'], j['RAnklePositions'])) / 2)
+
+
+def _angle(a, b, c):
+    """angle (degrees) at b between b->a and b->c"""
+    u, w = a - b, c - b
+    cos = (u * w).sum(-1) / (np.linalg.norm(u, axis=-1) * np.linalg.norm(w, axis=-1))
+    return np.degrees(np.arccos(np.clip(cos, -1, 1)))
 
 
 def subject(person, scenario, overwrite=False):
@@ -72,14 +93,14 @@ def subject(person, scenario, overwrite=False):
 
 def mocap_50hz(person, scenario, overwrite=False):
     """mocap_signals of the subject's track, or None without MoCap; cached in mocap_50hz.npz (recomputed when the
-    track or RADAR_XYZ change)"""
+    track or RADAR_XYZ change, or a signal in SIGNALS is missing)"""
     track = subject(person, scenario, overwrite)['track']
     if track is None:
         return None
     path = os.path.join(recording_dir(person, scenario), 'mocap_50hz.npz')
     if os.path.exists(path) and not overwrite:
         d = dict(np.load(path))
-        if tuple(d.pop('_radar_xyz')) == tuple(RADAR_XYZ) and str(d.pop('_track')) == track:
+        if tuple(d.pop('_radar_xyz')) == tuple(RADAR_XYZ) and str(d.pop('_track')) == track and set(SIGNALS) <= set(d):
             return d
     d = mocap_signals(track, RADAR_XYZ)
     np.savez(path, _radar_xyz=np.array(RADAR_XYZ), _track=track, **d)
