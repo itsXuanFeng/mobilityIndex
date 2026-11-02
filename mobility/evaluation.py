@@ -1,6 +1,7 @@
 """
 Radar vs MoCap: per epoch (AUC, and F1 with thresholds calibrated leave-one-subject-out) and per recording (the
-registered metrics: error for times, rank correlation for energy). Category 2 adds the bouts: per epoch (inside a bout
+registered metrics: error for times; for energy, rank correlation and the error after a conversion to MoCap units
+fitted leaving the person out). Category 2 adds the bouts: per epoch (inside a bout
 or not) and per bout (matched between radar and MoCap). Category 3 adds the postural transitions, per event.
 
 Generalisation: when recording r (person p) is evaluated, nothing calibrated on p is used. MoCap active / inactive is
@@ -39,7 +40,7 @@ def epoch_table(sessions, features, gt_thresholds):
     return pd.concat(out, ignore_index=True)
 
 
-def epoch_pairs(session, radar_threshold, mocap_threshold, active_feature='n_cells', energy_feature='p_r4'):
+def epoch_pairs(session, radar_threshold, mocap_threshold, active_feature='n_cells', energy_feature='e_body'):
     """per 1 s epoch over the whole recording, the Category 1 states side by side: movement energy and active call
     of the radar and of MoCap, whether the epoch is evaluated, its label and label class, distance to the radar"""
     n = int(round(EPOCH_S * FPS))
@@ -98,18 +99,53 @@ def metric_table(sessions, thresholds, gt_thresholds, category=None, bout_rules=
     return pd.DataFrame(rows)
 
 
+def energy_conversion(g):
+    """for a metric in source units (energy), per recording: the radar value in MoCap units, with one factor
+    (sum of MoCap / sum of radar) fitted on the other persons' recordings; and the no-radar baseline, the other
+    persons' mean MoCap value. g: the metric's rows of metric_table"""
+    person = g.rec.str.split('/').str[0].values
+    radar, mocap = g.radar.values, g.mocap.values
+    pred = np.array([radar[i] * mocap[person != p].sum() / radar[person != p].sum() for i, p in enumerate(person)])
+    base = np.array([mocap[person != p].mean() for p in person])
+    return pd.DataFrame(dict(rec=g.rec.values, person=person, mocap=mocap, converted=pred, baseline=base))
+
+
 def metric_agreement(mt):
     """per metric across recordings. Same units on both sides (times): mean absolute error and bias (radar - MoCap).
-    Different units (energy): only a rank correlation across recordings can check it."""
+    Different units (energy): Spearman across recordings, and the mean absolute error and bias after the conversion
+    to MoCap units (energy_conversion), in % of the mean MoCap value, next to the no-radar baseline's error."""
     rows = []
     for k, g in mt.groupby('metric', sort=False):
         row = dict(metric=k, n=len(g), unit=g.unit.iloc[0])
         if 'source units' in g.unit.iloc[0]:
-            row.update(spearman=spearmanr(g.radar, g.mocap)[0])
+            c = energy_conversion(g)
+            m = c.mocap.mean()
+            row.update(spearman=spearmanr(g.radar, g.mocap)[0],
+                       error_pct=100 * (c.converted - c.mocap).abs().mean() / m,
+                       bias_pct=100 * (c.converted - c.mocap).mean() / m,
+                       baseline_error_pct=100 * (c.baseline - c.mocap).abs().mean() / m)
         else:
             diff = g.radar - g.mocap
             row.update(mean_abs_err=diff.abs().mean(), bias=diff.mean())
         rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def per_person(table, feature, thresholds, mt):
+    """per person, over their evaluated epochs pooled: AUC of the feature, F1 of the active and of the inactive
+    calls (each recording with its own threshold); and the energy error after the conversion to MoCap units, in %
+    of the person's mean MoCap energy"""
+    w = table[table.window & table[feature].notna()]
+    pred = w[feature].values > w.rec.map(thresholds).values
+    c = energy_conversion(mt[mt.metric == 'total_activity_energy'])
+    rows = []
+    for p, g in w.groupby('person', sort=False):
+        y, yhat = g.active.values, pred[(w.person == p).values]
+        e = c[c.person == p]
+        rows.append(dict(person=p, recordings=g.rec.nunique(), epochs=len(g), auc=roc_auc_score(y, g[feature]),
+                         f1_active=f1_score(y, yhat), f1_inactive=f1_score(~y, ~yhat),
+                         energy_error_pct=100 * (e.converted - e.mocap).abs().mean() / e.mocap.mean(),
+                         energy_bias_pct=100 * (e.converted - e.mocap).mean() / e.mocap.mean()))
     return pd.DataFrame(rows)
 
 

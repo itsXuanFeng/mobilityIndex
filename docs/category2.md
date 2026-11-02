@@ -214,7 +214,7 @@ Machine and env: `barabas`, `distrimuse` conda env.
 
 **Inputs and code version.**
 - **Inputs:** the Category 1 thresholds (`output/category1/thresholds.csv`) and the MoCap epochs and thresholds in `output/groundtruth/`, from the runs in [Category 1](category1.md#runs-and-outputs).
-- **Code:** the runs used the working tree on top of commit `ac098d0`. The Category 2 code is not committed yet; commit it to pin the version that produced these numbers.
+- **Code:** commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`). The runs used the working tree on top of `ac098d0` that became this commit; the Category 3 additions in it don't change the Category 2 code paths.
 
 **Tables in `output/category2/`:**
 

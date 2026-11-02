@@ -67,7 +67,7 @@ def _features(person, scenario, overwrite):
         have.update(new)
         have['_floor_db'] = floor
         np.savez(path, **have)
-    return {k: v for k, v in have.items() if not k.startswith('_')}
+    return {k: have[k] for k in FEATURES}             # caches may still hold features that were removed
 
 
 def _angle_features(person, scenario, n_frames, overwrite):
@@ -127,6 +127,8 @@ def load_session(person, scenario, overwrite=False):
     care = caregiver_period(lb)
     no_caregiver = ~((t >= care[0]) & (t <= care[1])) if care else np.ones(T, bool)
     no_data = np.isnan(radar['p_sub'])
+    if 'e_body' in radar:                             # 0 means "nothing seen moving", not "no data"
+        radar['e_body'] = np.where(no_data, np.nan, radar['e_body'])
     masks = dict(has_mocap=has_mocap, covered=covered, in_script=in_script, no_caregiver=no_caregiver,
                  window=has_mocap & covered & in_script & no_caregiver & ~no_data)
     return Session(person, scenario, t, radar, gt, lb, masks, al)

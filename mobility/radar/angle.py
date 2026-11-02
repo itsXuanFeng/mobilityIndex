@@ -143,7 +143,7 @@ TOP_QUANTILE = 0.9         # top of the body: this quantile of the person's poin
 # peak Doppler: power-weighted quantiles of the person's moving speeds; which one is calibrated against MoCap
 PEAK_QUANTILES = (0.9, 0.95, 0.98, 0.99, 0.995)
 PEAK_FEATURES = tuple(f'v_q{round(q * 1000)}' for q in PEAK_QUANTILES)
-ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow') + PEAK_FEATURES
+ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body') + PEAK_FEATURES
 
 
 def frame_features(points, floor_db, n_frames):
@@ -153,6 +153,9 @@ def frame_features(points, floor_db, n_frames):
         h_top       height of the top of the body (m): TOP_QUANTILE of the heights of the person's points
         x_person, z_person   position of the person (m, MoCap frame): median of all clearly visible points
         n_person    number of the person's points;  n_slow: of them, slower than MIN_SPEED (still)
+        e_body      movement energy of the person (m^2/s^2): mean squared radial speed over all their points, still
+                    ones (slow bins, breathing) included, as the MoCap energy averages over all joints. 0 where the
+                    person isn't seen: nothing is seen moving. Category 1's total activity energy
         v_q900 ... v_q995    speed of the person (m/s, along the line to the radar): the power-weighted quantile
                     PEAK_QUANTILES of the |velocity| of their moving points. A high quantile, not the fastest cell:
                     a strong reflection leaks power into neighbouring Doppler bins, and the fastest cell above the
@@ -164,7 +167,7 @@ def frame_features(points, floor_db, n_frames):
     import pandas as pd
     from ..config import COVERAGE_RADIUS, MIN_SPEED, ROOM_MAX_X, VELOCITY_AXIS
     out = {k: np.full(n_frames, np.nan) for k in ANGLE_FEATURES}
-    out['n_person'][:] = out['n_slow'][:] = 0
+    out['n_person'][:] = out['n_slow'][:] = out['e_body'][:] = 0
     strong = points['db'].astype(np.float32) > floor_db[points['rbin'], points['dbin']] + STRONG_DB
     p = localise({k: v[strong] for k, v in points.items()})
     ok = ((RANGE_AXIS[p['rbin']] <= COVERAGE_RADIUS) & (p['x'] < ROOM_MAX_X) & (p['y'] > -0.3)
@@ -183,6 +186,7 @@ def frame_features(points, floor_db, n_frames):
     f = n.index.values
     out['n_person'][f] = n.values
     out['n_slow'][f] = g.slow.sum().loc[f].values
+    out['e_body'][f] = (person.speed ** 2).groupby(person.frame).mean().loc[f].values
     out['h_top'][f] = g.y.quantile(TOP_QUANTILE).loc[f].values
     out['x_person'][f] = centre.x.loc[f].values
     out['z_person'][f] = centre.z.loc[f].values

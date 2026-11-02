@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import EPOCH_S, FPS
+from .config import EPOCH_S, FPS, MAX_MOCAP_RMS
 from .groundtruth import active_speed_thresholds
 from .radar.features import FEATURES
 from .utils import epoch_mean, log_level
@@ -43,9 +43,9 @@ def feature_level(session, name, n=None):
     return epoch_mean(log_level(x) if FEATURES[name].log else x, n)
 
 
-def radar_states(session, threshold, active_feature='n_cells', energy_feature='p_r4', window='window'):
+def radar_states(session, threshold, active_feature='n_cells', energy_feature='e_body', window='window'):
     """active when the epoch level of active_feature exceeds threshold (calibrated against MoCap); energy from
-    energy_feature (p_r4: distance-corrected power)"""
+    energy_feature (e_body: mean squared radial speed of the person's points, from the angle pass)"""
     n, t, valid = _epochs(session, window)
     level = feature_level(session, active_feature, n)
     energy = epoch_mean(session.radar[energy_feature], n)
@@ -57,12 +57,12 @@ def radar_states(session, threshold, active_feature='n_cells', energy_feature='p
 def mocap_states(session, active_speed=None, window='window'):
     """energy: mean squared joint speed; level: RMS joint speed (m/s); active above active_speed. Default
     active_speed: the threshold calibrated against the activity labels without this person
-    (scripts/calibrate_mocap_threshold.py)."""
+    (scripts/calibrate_mocap_threshold.py). Epochs faster than MAX_MOCAP_RMS are tracking jumps: not valid."""
     if active_speed is None:
         thr = active_speed_thresholds()
         active_speed = thr.get(session.person, thr['ALL'])   # 'ALL': people outside the calibration
     n, t, valid = _epochs(session, window)
     energy = epoch_mean(session.mocap['ke'], n)
     level = np.sqrt(energy)
-    valid &= ~np.isnan(level)
+    valid &= ~np.isnan(level) & (level <= MAX_MOCAP_RMS)
     return States('mocap', t, energy, level, level > active_speed, valid, extra=dict(active_speed=active_speed))

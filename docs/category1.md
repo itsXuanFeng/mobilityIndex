@@ -4,12 +4,13 @@
 
 ## Summary
 
-- **Active and inactive time work.** On 148 recordings from 27 people, the radar's active/inactive call per 1 s epoch matches MoCap with median AUC 0.97 and F1 0.91 (10th–90th percentile over recordings: F1 0.86–0.93). No recording scores below F1 0.82. Per recording, active and inactive time are off by 0.17 min on average, out of about 5.6 evaluated minutes (6.8% of the active time). Every threshold is calibrated without the person being evaluated.
-- **Total activity energy does not work yet.** Radar and MoCap energy rank the 148 recordings almost independently (Spearman 0.19). With the full campaign, too few recordings is no longer the explanation: the radar's energy measure doesn't track whole-body movement energy across recordings. This is the main open problem of Category 1.
+- **Active and inactive time work.** On 148 recordings from 27 people, the radar's active/inactive call per 1 s epoch matches MoCap with median AUC 0.97 and F1 0.91 (10th–90th percentile over recordings: F1 0.86–0.93). No recording scores below F1 0.83. Per recording, active and inactive time are off by 0.17 min on average, out of about 5.6 evaluated minutes (6.9% of the active time). Every threshold is calibrated without the person being evaluated.
+- **The detection of moving cells can run online.** The chosen design is a running 20th percentile per cell (τ = 2 min) plus a 2D SO-CFAR at 4.5 dB. It needs only past frames and matches the current whole-recording floor (AUC 0.972, F1 0.910, against 0.971 and 0.907). It is a prototype, not yet wired into the pipeline; see [Online detector](#online-detector).
+- **Total activity energy works, from the point cloud.** The energy is the mean squared radial speed of the person's own points, from the angle pass. It ranks the 148 recordings like MoCap (Spearman 0.80), and after one conversion factor fitted without the evaluated person, it is off by 9.4% of the MoCap energy on average. A no-radar guess (the other people's mean) is off by 16.0%. Energies from the range-Doppler map did not work (Spearman 0.16–0.60): they grow with the recording's length even when nobody moves.
 - **The MoCap ground truth is calibrated, not set by hand.** "Active" means whole-body movement: the RMS joint-speed threshold is calibrated against the activity labels, leaving the evaluated person out. It comes out at 0.25 m/s, the same within ±0.003 m/s whoever is left out.
 - **The biggest problem was time alignment.** The legacy code (`mobilityIndex_legacy`) placed radar frames evenly between the first and last label, which is tens of seconds wrong. Its finding that "the radar can't see walking" is most likely this bug, not physics.
 - **Main bottlenecks:**
-  - total activity energy (above);
+  - the energy needs the angle pass, a second 7 h read of the raw data;
   - the parts of each recording where MoCap and radar don't see the same subject alone (a third of the radar time can't be evaluated);
   - the signal level's dependence on where the person is;
   - reading the raw data, limited by the 1 Gbit/s network (7 h for the campaign).
@@ -41,7 +42,10 @@ The method was developed on 6 recordings, one per scenario layout: person_1/scen
 ```mermaid
 flowchart TD
     A[("raw .bin files<br/>13 GB per recording")] -->|"1. radar pass: all 12 channels,<br/>range FFT, clutter removal, Doppler FFT,<br/>mean power over channels"| B["cube: T x 128 range x 128 Doppler (dB)"]
-    B -->|"2. noise floor per cell<br/>(20th percentile over time)"| C["per-frame features<br/>n_cells, p_sub, p_r4, v_rms, ..."]
+    B -->|"2. noise floor per cell<br/>(20th percentile over time)"| C["per-frame features<br/>n_cells, p_sub, v_rms, ..."]
+    A -->|"angle pass: per-channel values<br/>of the cells above the floor"| PT["points: range, Doppler,<br/>3-D position"]
+    PT -->|"2. the person's points"| EB["e_body per frame"]
+    EB --> S
     M[("MoCap shot")] -->|"3. pick subject track,<br/>joint velocities"| G["MoCap per 50 Hz:<br/>kinetic-energy proxy, distance, radial speed"]
     L[("activity labels")] -->|"3. active / inactive classes,<br/>leave-person-out"| TH["MoCap active threshold"]
     G --> TH
@@ -72,10 +76,39 @@ A cell (range bin, Doppler bin) can hold a moving person when its range is ≥ 0
 |---|---|---|
 | `n_cells` | number of moving cells > 6 dB above their floor | **active / inactive** |
 | `p_sub` | moving power above the floor, summed | alignment |
-| `p_r4` | `p_sub` within the 5 m coverage, each range bin weighted by r⁴ | **total activity energy** (distance-corrected); also a good active / inactive feature |
 | `v_rms` | RMS radial speed of the cells above the floor | alternative activity level |
 | `v_centroid` | signed mean radial velocity | direction check (Category 3) |
 | `r_near` | range of the nearest clearly moving reflector | radar position fit, height (Category 3) |
+| `e_body` | mean squared radial speed of the person's points, from the point cloud (below) | **total activity energy** |
+
+**Energy from the point cloud (`e_body`).** The angle pass ([angle.md](angle.md)) stores, for every cell more than 6 dB above its floor, its value on each of the 12 channels, so each cell becomes a point with a 3-D position and a radial speed. Per frame ([mobility/radar/angle.py](../mobility/radar/angle.py), `frame_features`):
+1. **Clearly visible points:** more than 12 dB above the floor, within the 5 m coverage and the room, between the floor and the radar.
+2. **The person's points:** within 1 m (horizontally) of the median position of those points; at least 3 of them, otherwise the person isn't seen.
+3. **`e_body`:** the mean of v² over *all* of the person's points, still ones included (slow Doppler bins: breathing, small movements). It is 0 when the person isn't seen: nothing is seen moving.
+
+This mirrors the MoCap energy, the mean of the squared speed over all joints, still joints included. Only the person's points count, so noise and reflections elsewhere in the room drop out. Dividing by the person's own points also cancels much of the distance effect: a distant person yields fewer points, moving and still alike.
+
+**Online detector (chosen design, prototype).** The noise floor above needs the whole recording, so it can't run live. The online replacement judges each frame only against the past, in three steps per frame:
+
+1. **Clutter map:** a running 20th percentile of each cell's power in dB. When the cell is above the map, the map moves up by a small step; otherwise it moves down by four times that step. A person who occupies a cell less than 80% of the time therefore doesn't raise it. The map starts as the 20th percentile of the first 2 s.
+2. **Subtraction:** the current map minus the clutter map, in dB (a ratio in linear power), so that noise is about the same in every cell.
+3. **2D SO-CFAR:** around each cell, four training strips (before and after it in range, before and after it in Doppler), outside a guard window. The cell's background is the *smallest* of the four strip means. The cell is detected when it exceeds k × background.
+
+Each frame is tested against the map from the previous frame, and the map is updated afterwards. `n_det`, the number of detected moving cells (range ≥ 0.3 m, speed ≥ 0.1 m/s), replaces `n_cells`. Its active threshold is calibrated leaving the person out, exactly as for `n_cells`.
+
+| Parameter | Value |
+|---|---|
+| clutter-map percentile | 20th |
+| time constant τ | 2 min: a reflector that stays 10 dB above the map is absorbed after τ (up 0.004 dB per frame, down 0.017 dB per frame) |
+| start | 20th percentile of the first 2 s |
+| guard, each side | 4 range bins (18 cm), 3 Doppler bins (13 cm/s) |
+| training strips | 8 cells long (35 cm in range, 35 cm/s in Doppler), 3 cells wide; Doppler wraps around, range is mirrored at its ends |
+| CFAR factor k | 4.5 dB (× 2.8) |
+
+Why these choices:
+- **A running percentile, not a running mean.** A running mean takes in the person's own echoes where they move, so the current power there is only 0.3–0.5 of the map. SO-CFAR then takes those strips as the background, and about 200 cells fire in quiet frames.
+- **SO-CFAR (smallest of):** a person covers tens of range bins and many Doppler bins. Taking the smallest strip keeps the noise estimate from the side the person doesn't fill.
+- **The subtraction keeps a noise scale:** CFAR runs on the ratio to the clutter map, not on the linear difference. In a difference, noise-only cells average zero, and the CFAR background would collapse with them.
 
 ### 3. MoCap ground truth
 
@@ -102,6 +135,8 @@ The threshold maximises balanced accuracy between the two classes. For each pers
 | Data | 150 recordings, 27 people; 23,473 active and 11,381 inactive labelled epochs |
 | Threshold, leaving each person out | 0.249–0.254 m/s (all people: 0.253 m/s) |
 | Held-out person vs labels | AUC median 0.92 (0.84–0.96), F1 median 0.88 (0.78–0.93) |
+
+**Tracking jumps.** An epoch whose RMS joint speed exceeds 3 m/s is a MoCap tracking jump, not movement, and is not valid (10 epochs in 7 recordings). The squared speed has no upper bound, so a single jump can dominate an energy total: in person_22/scenario_5, one such epoch held 91% of the recording's MoCap energy. The 3 m/s cut is set by hand: well above any whole-body movement in the script (99th percentile per person: 0.8–2.0 m/s).
 
 The threshold barely moves when a person is left out, so it should generalise to new people. Labelled segments are not uniformly active: a "sit down" label also holds a moment of standing still before and after. As a result, only 45–83% of the epochs in transition labels are above the threshold, and the held-out F1 against the labels stays below 1.
 
@@ -154,10 +189,10 @@ flowchart LR
     P -- "no: 0.2 min" --> X4["excluded"]
     P -- yes --> K{"no caregiver<br/>in the room?"}
     K -- "no: 102 min (8%)" --> X3["excluded"]
-    K -- yes --> E["evaluated: 848 min (67%)<br/>50,874 epochs"]
+    K -- yes --> E["evaluated: 848 min (67%)<br/>50,864 epochs"]
 ```
 
-The **scripted period** runs from the first label start to the last label end. Before and after it, the operator sets up or clears the room. The **caregiver visit** runs from the first to the last caregiver label. Nearly all out-of-script time with MoCap is already excluded by coverage (subject in the corridor). The check makes the operator exclusion explicit.
+The **scripted period** runs from the first label start to the last label end. Before and after it, the operator sets up or clears the room. The **caregiver visit** runs from the first to the last caregiver label. Nearly all out-of-script time with MoCap is already excluded by coverage (subject in the corridor). The check makes the operator exclusion explicit. The 10 epochs with a MoCap tracking jump (§3) are left out as well.
 
 ### 7. States and metrics
 
@@ -165,7 +200,7 @@ Per epoch, the radar and MoCap are turned into the same `States`: energy, activi
 
 | Metric | Rule | Radar | MoCap |
 |---|---|---|---|
-| total activity energy | Σ energy over valid epochs × epoch length | `p_r4` | mean squared joint speed (whole body) |
+| total activity energy | Σ energy over valid epochs × epoch length | `e_body` (point cloud) | mean squared joint speed (whole body) |
 | active time | active valid epochs × 1 s | `n_cells` level > radar threshold | RMS joint speed > MoCap threshold (§3) |
 | inactive time | inactive valid epochs × 1 s | | |
 
@@ -184,11 +219,13 @@ So nothing calibrated on the evaluated person is used, also when a person has se
   The same AUC with a lower F1 means the threshold doesn't transfer well between persons. F1 counts only the active class; about 40% of the epochs are active, so calling everything active would still give F1 ≈ 0.6.
 - **Per recording**, on the metrics themselves:
   - active and inactive time: mean absolute error and bias (radar − MoCap), in minutes;
-  - total activity energy: radar and MoCap energy are different quantities in different units, so only a rank correlation across recordings (Spearman) can check it.
+  - total activity energy: the radar sees only the radial speed of reflecting points, MoCap the full speed of 16 joints, so the two scales differ. Two checks:
+    - Spearman across recordings;
+    - the error after converting the radar energy to MoCap units with one factor (total MoCap ÷ total radar energy) fitted on the other 26 persons: mean absolute error and bias, in % of the mean MoCap energy. It is compared with a no-radar baseline that predicts every recording as the other persons' mean MoCap energy.
 
 ## Results
 
-All results are on the 148 evaluated recordings (27 persons, 50,874 epochs). "Median (10th–90th)" is over recordings.
+All results are on the 148 evaluated recordings (27 persons, 50,864 epochs). "Median (10th–90th)" is over recordings.
 
 ### The three metrics
 
@@ -196,12 +233,12 @@ All results are on the 148 evaluated recordings (27 persons, 50,874 epochs). "Me
 
 | | Value |
 |---|---|
-| MoCap, per recording | 2.39 min (2.03–2.97) |
+| MoCap, per recording | 2.39 min (2.03–2.95) |
 | radar, per recording | 2.45 min (2.00–3.19) |
-| mean absolute error | **0.17 min** (6.8% of the MoCap active time) |
+| mean absolute error | **0.17 min** (6.9% of the MoCap active time) |
 | bias (radar − MoCap) | +0.09 min |
 | absolute error: median, 90th percentile, max | 0.12, 0.33, 0.88 min (max: person_26/scenario_6) |
-| recordings within ±0.25 min / ±0.5 min | 76% / 95% |
+| recordings within ±0.25 min / ±0.5 min | 77% / 95% |
 | mean error per person | −0.39 (person_26) to +0.38 min (person_6) |
 
 **Inactive time**
@@ -210,7 +247,7 @@ All results are on the 148 evaluated recordings (27 persons, 50,874 epochs). "Me
 |---|---|
 | MoCap, per recording | 3.14 min (2.48–4.08) |
 | radar, per recording | 3.15 min (2.46–3.92) |
-| mean absolute error | **0.17 min** (5.1% of the MoCap inactive time) |
+| mean absolute error | **0.17 min** (5.2% of the MoCap inactive time) |
 | bias (radar − MoCap) | −0.09 min |
 
 Active and inactive time are complementary: both sides use the same valid epochs, so an error in one is the opposite error in the other.
@@ -219,14 +256,19 @@ Active and inactive time are complementary: both sides use the same valid epochs
 
 | | Value |
 |---|---|
-| radar (`p_r4`, arbitrary units × s), per recording | 3.47 (2.78–4.29) |
-| MoCap (m²/s² × s), per recording | 65.3 (52.1–85.4) |
-| Spearman across recordings | **0.19** |
+| radar (`e_body`, radial, m²/s² × s), per recording | 23.3 (19.2–27.9) |
+| MoCap (m²/s² × s), per recording | 65.2 (51.5–83.0) |
+| Spearman across recordings | **0.80** |
+| error after the conversion to MoCap units | **9.4%** of the MoCap energy (bias −0.0%) |
+| no-radar baseline | 16.0% |
+| error per person | median 8.9%; all below the baseline except person_8 (20.8%) and person_26 (29.6%) |
 
-The two energies rank the recordings almost independently. One reason is checked: noise. `p_r4` sums the power above each cell's 20th-percentile floor over every moving cell, so noise adds to it everywhere, and the r⁴ weight amplifies the far bins most. On person_10/scenario_2 and person_12/scenario_5, about 25% of the total came from beyond 5 m and about 45% from cells never more than 6 dB above their floor. Limiting `p_r4` to the 5 m coverage raised the Spearman from 0.15 to 0.19; also keeping only cells more than 6 dB above their floor gave 0.28 in a one-off check (0.35 per evaluated minute). Other possible reasons, not checked yet:
-- they measure different things: radar power grows with the reflecting body surface moving along the line to the radar, MoCap energy with whole-body speed squared;
-- the radar side still depends on distance and angle (below);
-- the recordings differ little in total energy (they all follow the same script), so small errors reorder them.
+- **The energy doesn't grow with recording length.** Across recordings, its Spearman with the evaluated minutes is 0.03, like MoCap's (−0.02): when nobody moves, there are no moving points, and extra still time adds nothing.
+- **Person_26 is underestimated** in every recording (bias −30%), and person_8 overestimated (+21%): a person-dependent scale remains for a few people.
+
+**From the range-Doppler map it didn't work.** Distance-corrected moving power (r⁴-weighted, `p_r4`) ranked the recordings at Spearman 0.16, with an error of 18.7%, worse than the no-radar baseline. The power-weighted squared Doppler speed (`v_rms`²) reached 0.60 and 12.1%. Both grow with the recording's length (Spearman 0.70 and 0.52 with the evaluated minutes): noise and reflections above the floor add energy even when nobody moves. People with long, mostly still recordings (person_6, person_24) came out 80–85% too high. The point cloud removes both, by keeping only the person's points. `p_r4` has been removed from the code.
+
+![Energy error per person](../output/plots/per_person/per_person_energy_error.png)
 
 Active and inactive time vary between persons in a way that is partly systematic. The mean active-time error per person ranges from −0.39 to +0.38 min, so some people come out consistently too active (person_6, person_15, person_24) or too inactive (person_26).
 
@@ -234,16 +276,44 @@ Active and inactive time vary between persons in a way that is partly systematic
 
 | Feature | AUC | F1 | lowest F1 |
 |---|---|---|---|
-| **`n_cells`** | **0.971 (0.949–0.986)** | **0.907 (0.862–0.931)** | 0.82 |
-| `p_r4` | 0.962 (0.931–0.980) | 0.901 (0.855–0.930) | 0.81 |
-| `v_rms` | 0.961 (0.929–0.975) | 0.878 (0.838–0.912) | 0.76 |
-| `p_sub` | 0.931 (0.890–0.958) | 0.847 (0.794–0.878) | 0.74 |
+| **`n_cells`** | **0.971 (0.949–0.986)** | **0.907 (0.862–0.931)** | 0.83 |
+| `v_rms` | 0.961 (0.931–0.975) | 0.880 (0.837–0.912) | 0.76 |
+| `p_sub` | 0.931 (0.891–0.958) | 0.847 (0.794–0.878) | 0.74 |
 
-- **`n_cells` and `p_r4` are on par** on the median. `n_cells` holds up better in the worst recordings (lowest F1 0.82 vs 0.81), so it stays the active/inactive feature.
-- **Uncorrected power (`p_sub`) is clearly worse,** because of its distance dependence (below).
-- **The lowest F1 (`n_cells`)** is 0.82–0.84, in person_15/scenario_5, person_6 (scenarios 1, 2 and 3), person_25/scenario_1, person_12/scenario_5, person_26/scenario_6 and person_15/scenario_4. Per person, the median F1 ranges from 0.84 to 0.94.
+- **`n_cells` is the best feature,** also in the worst recordings, so it is the active/inactive feature.
+- **Moving power (`p_sub`) is clearly worse,** because of its distance dependence (below).
+- **The lowest F1 (`n_cells`)** is 0.83–0.84, in person_15/scenario_5, person_6 (scenarios 1, 2 and 3), person_25/scenario_1, person_12/scenario_5, person_26/scenario_6 and person_15/scenario_4.
+- **Per person** (each person's epochs pooled): AUC 0.94–0.99, F1 0.84–0.93 for the active calls and 0.89–0.95 for the inactive ones. F1 is higher for the inactive class because inactive epochs are the majority (about 60%).
+
+![AUC and F1 per person](../output/plots/per_person/per_person_scores.png)
 
 The development subset gave the same picture (AUC 0.96, F1 0.88–0.89 on 6 recordings), so the method generalises to the full campaign.
+
+### Online detector
+
+The online detector (§2) was scored like `n_cells`: leave-person-out radar threshold, AUC and F1 per recording against MoCap active, on the 148 recordings. Two subsets show its specific risks:
+- **in bed:** a person moving in the same cells could be taken into the clutter map;
+- **the first 2 min:** the clutter map is still converging.
+
+On those two subsets, F1 is pooled over the epochs.
+
+| Detector | AUC | F1 | F1, 10th percentile | F1 in bed | F1, first 2 min |
+|---|---|---|---|---|---|
+| global 20th percentile + 6 dB (`n_cells`, current) | 0.971 | 0.907 | 0.862 | 0.924 | 0.950 |
+| **running 20th percentile (τ 2 min) + SO-CFAR 4.5 dB (chosen)** | **0.972** | **0.910** | **0.859** | **0.925** | **0.953** |
+| running 20th percentile (τ 30 s) + fixed 6 dB, no CFAR | 0.972 | 0.909 | 0.861 | 0.924 | 0.953 |
+| SO-CFAR 4.5 dB alone, no clutter map | 0.972 | 0.908 | 0.864 | 0.925 | 0.948 |
+| running mean (τ 2 min) + SO-CFAR 6 dB | 0.794 | 0.623 | 0.493 | 0.804 | 0.622 |
+
+- **Online costs nothing:** every running-percentile and SO-CFAR-only variant scores AUC 0.969–0.973 and F1 0.899–0.910. That holds for every time constant (30 s, 2 min, 10 min) and every CFAR factor (3, 4.5, 6 dB).
+- **No warm-up penalty and no absorption in bed:** both subsets score as well as with the global floor.
+- **The running mean fails** for the reason in §2: the person's echoes raise it.
+- **On these recordings, the clutter map adds nothing measurable:** SO-CFAR on the range-Doppler map alone scores the same. The per-frame chirp-mean subtraction already removes static reflections, and the lab has no persistent moving clutter (fans, curtains) for the map to learn. The clutter map is kept for deployment, where such clutter is expected.
+- **The design is chosen on its properties, not on these scores.** The variants differ by at most 0.004, and that difference was measured on the same data a choice would be judged on.
+
+The global floor itself is just as insensitive. Over percentiles 5–50 and margins 3–12 dB, median AUC stays within 0.961–0.975 and F1 within 0.889–0.911 (`output/plots/sensitivity/floor_sensitivity.png`). Most of the change is taken up by the recalibrated radar threshold.
+
+Not done yet: choosing the point cloud's cells (for the energy) with the online detector instead of the global floor.
 
 ### Over time
 
@@ -265,7 +335,7 @@ Movement is the z-score of log energy, each sensor standardised over its evaluat
 
 What the figures show:
 - **Onsets and offsets line up within about a second.** Walking, sitting down, standing up, lying down, getting up and restless movement in bed rise and fall together in both sensors. Most disagreements are one or two epochs at the edges of a movement: the thin blue and orange slivers.
-- **The radar has a floor; MoCap doesn't.** When nothing moves faster than 0.1 m/s, the radar sits flat at its noise floor, while MoCap still shows small arm movements. At the far chair (3.2 m, e.g. person_10) the radar doesn't see eating and drinking at all. Both call those epochs inactive, so they agree, but the radar loses the detail.
+- **The radar's movement also follows small movements.** At the far chair (3.2 m, person_10), eating and drinking show in both sensors, because the point cloud keeps the slow points of the person. When the person isn't seen moving at all, the radar drops to its floor (no moving points), while MoCap still shows small movements.
 - **Arm-only tasks near the radar.** In scenario 5 (person_12) the chair stands close to the radar (median distance 2.0 m). There the radar sees the eating and drinking movements and calls some of them active, while the label definition counts arm-only tasks as inactive. So whether arm-only tasks come out inactive depends partly on the distance to the radar.
 - **Person_15: disagreements cluster in bed** (minutes 3.5–4.6). The radar calls movement where MoCap stays below its threshold. SCOPE.md notes that MoCap is unreliable under a blanket; whether that is the cause has not been checked.
 - **Outside the window, the radar sees others.** Before MoCap starts and after the subject leaves, the radar keeps seeing movement (operator, caregiver). This is why those periods are excluded.
@@ -277,16 +347,16 @@ The table shows the share of epochs active by MoCap → by radar, where the two 
 | Activity | MoCap → radar | Distance | Why |
 |---|---|---|---|
 | Stop anxious movement and lie on your back | 0.36 → 0.58 | 1.9 m | in bed close to the radar, the radar calls more movement |
-| Lie on your back again and lie still | 0.64 → 0.77 | 1.9 m | same |
+| Lie on your back again and lie still | 0.64 → 0.76 | 1.9 m | same |
 | Anxious movement in bed | 0.82 → 0.94 | 1.9 m | same |
-| Lay down on the bed; go from upright to lying | 0.72 → 0.82; 0.45 → 0.55 | 1.9 m | same |
+| Lay down on the bed; go from upright to lying | 0.72 → 0.81; 0.45 → 0.55 | 1.9 m | same |
 | Enter the room and stand on the cross | 0.28 → 0.12 | 3.9 m | far, at the entrance (only 32 epochs) |
-| Caregiver enters / leaves (outside the window) | 0.07 → 0.40; 0.08 → 0.43 | | the radar sees the caregiver |
-| Walk to / back from the kitchen | 0.94 → 0.52; 0.93 → 0.52 | 4.2–4.3 m | partly out of range |
-| Person goes outside; wander in the corridor | 0.93 → 0.41; 0.91 → 0.01 | 4.5–6.5 m | out of range |
+| Caregiver enters / leaves (outside the window) | 0.07 → 0.39; 0.08 → 0.42 | | the radar sees the caregiver |
+| Walk to / back from the kitchen | 0.94 → 0.51; 0.93 → 0.52 | 4.2–4.3 m | partly out of range |
+| Person goes outside; wander in the corridor | 0.93 → 0.40; 0.91 → 0.01 | 4.5–6.5 m | out of range |
 
-- **Arm-only tasks agree:** eating 0.09 vs 0.11, drinking 0.05 vs 0.05, wearable button 0.12 vs 0.18.
-- **Putting down the plate or glass:** 0.29 vs 0.21 and 0.14 vs 0.09.
+- **Arm-only tasks agree:** eating 0.09 vs 0.10, drinking 0.05 vs 0.04, wearable button 0.12 vs 0.17.
+- **Putting down the plate or glass:** 0.29 vs 0.19 and 0.14 vs 0.08.
 - **Walking and wandering in the room** (0.97 vs 0.97), standing up, sitting down, getting up, picking up a coin and lying down on the floor (0.51 vs 0.52) all agree within ±0.1.
 - **In bed the radar errs on the side of "active"** by 0.1–0.2 across the lying and turning labels.
 
@@ -294,18 +364,17 @@ The table shows the share of epochs active by MoCap → by radar, where the two 
 
 These are residuals of each feature after a fit on log MoCap energy, for active epochs at increasing distance from the radar to the CoG (log10 units; × 10 = dB for power):
 
-| Distance | `p_sub` | `p_r4` | `n_cells` |
-|---|---|---|---|
-| < 2 m | +0.32 | +0.09 | +0.27 |
-| 2–2.5 m | −0.15 | −0.05 | +0.06 |
-| 2.5–3 m | −0.33 | −0.12 | −0.12 |
-| 3–3.5 m | −0.44 | −0.17 | −0.26 |
-| 3.5–4 m | −0.43 | −0.18 | −0.39 |
-| 4–5 m | −0.49 | −0.27 | −0.73 |
+| Distance | `p_sub` | `n_cells` |
+|---|---|---|
+| < 2 m | +0.32 | +0.27 |
+| 2–2.5 m | −0.14 | +0.06 |
+| 2.5–3 m | −0.33 | −0.12 |
+| 3–3.5 m | −0.44 | −0.26 |
+| 3.5–4 m | −0.43 | −0.39 |
+| 4–5 m | −0.49 | −0.74 |
 
-- **Uncorrected power:** falls about 8 dB from under 2 m to 4–5 m.
-- **r⁴ correction:** removes about half of that; about 3.6 dB is left, probably from the antenna pattern off-axis.
-- **`n_cells`:** 10 times fewer cells at 4–5 m. Good for detecting activity, but not usable as an energy measure.
+- **Moving power:** falls about 8 dB from under 2 m to 4–5 m.
+- **`n_cells`:** 10 times fewer cells at 4–5 m. Good for detecting activity, but not usable as an energy measure. The energy (`e_body`) averages over the person's own points instead, so it doesn't count cells.
 
 ## Runs and outputs
 
@@ -315,7 +384,11 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 |---|---|---|---|
 | radar pass, all January recordings | 2026-10-22, 15:32–22:37 | `CUDA_VISIBLE_DEVICES=0 python scripts/radar_pass.py` | `output/<person>/<scenario>/rd12_db.npy`, `pass_info.json`; log `output/radar_pass_january.log` |
 | MoCap active threshold | 2026-10-22 | `python scripts/calibrate_mocap_threshold.py` | `output/groundtruth/` |
-| Category 1 evaluation | 2026-10-23, re-run after limiting `p_r4` to the coverage | `python scripts/evaluate_category1.py --workers 16` | `output/category1/`; log `output/category1_full.log` |
+| angle pass (points, for the energy) | 2026-10-25 18:31 – 2026-10-26 01:28 | `python scripts/angle_pass.py --device cpu --threads 8` | `output/<person>/<scenario>/points.npz`; see [angle.md](angle.md) |
+| Category 1 evaluation | 2026-10-29, after adopting the point-cloud energy and the MoCap tracking-jump filter | `python scripts/evaluate_category1.py --workers 16` | `output/category1/`; log `output/category1_full.log` |
+| per-person plots | 2026-10-29 | `python scripts/plot_per_person.py` | `output/plots/per_person/` |
+| global-floor sensitivity | 2026-10-27 | `python scripts/sensitivity_floor.py --workers 16` | `output/category1/floor_sensitivity.csv`, `output/plots/sensitivity/floor_sensitivity.png` |
+| online detector (prototype) | 2026-10-27 | `python scripts/prototype_so_cfar.py --workers 16` | `output/category1/so_cfar_prototype.csv`; log `output/category1/so_cfar_prototype.log` |
 
 **Where the radar pass is written.** `output/` is `/cw/dtaiexp/2026-XuanFeng/mobilityIndex/output/` (git-ignored; `MOBILITY_OUTPUT` overrides it). Each recording has its own folder:
 
@@ -327,6 +400,8 @@ The full-campaign results above come from these runs, on the machine `barabas` (
     subject.json       MoCap shot and subject track
     mocap_50hz.npz     MoCap signals of the subject
     alignment.json     time offset of radar frame 0
+    points.npz         the angle pass: per-channel values of the cells above the floor (docs/angle.md)
+    angle_features.npz per-frame features of the person from the points, including e_body (session cache)
 ```
 
 | Radar pass | Value |
@@ -339,7 +414,7 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 | time | 7.0 h in total, median 2.6 min per recording, about 95% of it waiting for data |
 | size | 51 GB |
 
-**Code version.** Commit `ac098d0` ("add cat 1 full-campaign results", 2026-10-23, on `origin/master`), plus the uncommitted change that limits `p_r4` to the coverage (`mobility/radar/features.py`), holds the code these runs used. Commit that change to pin the version. The commit includes:
+**Code version.** The earlier runs used commit `ac098d0` ("add cat 1 full-campaign results", 2026-10-23) and commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`), which also holds the angle pass. The 2026-10-29 re-run adds uncommitted changes: the point-cloud energy (`mobility/radar/angle.py`, `mobility/states.py`, `mobility/session.py`), the energy error and per-person table (`mobility/evaluation.py`, `scripts/evaluate_category1.py`, `scripts/plot_per_person.py`), the MoCap tracking-jump filter (`mobility/config.py`, `mobility/states.py`) and the removal of `p_r4`. Commit them to pin that version. Commit `ac098d0` includes:
 - damaged-frame masking and `pass_info.json` (`mobility/radar/cube.py`);
 - the label-calibrated MoCap threshold (`mobility/labels.py`, `mobility/groundtruth.py`, `scripts/calibrate_mocap_threshold.py`);
 - leave-one-subject-out radar thresholds and the alignment quality check (`mobility/evaluation.py`, `scripts/evaluate_category1.py`).
@@ -352,9 +427,12 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 | `thresholds.csv` | per recording: radar and MoCap active thresholds used for it |
 | `epoch_scores.csv` | per feature and recording: AUC, F1 |
 | `metrics.csv` | per recording: the three metrics, radar and MoCap |
-| `agreement.csv` | per metric: mean absolute error and bias (times), Spearman (energy) |
+| `agreement.csv` | per metric: mean absolute error and bias (times); Spearman, error and bias after the conversion to MoCap units, and the no-radar baseline (energy) |
+| `per_person.csv` | per person: AUC, F1 active, F1 inactive, energy error and bias |
 | `per_label.csv` | per scripted activity: MoCap and radar active share, coverage, distance |
 | `distance.csv` | distance dependence of each feature |
+| `floor_sensitivity.csv` | per floor percentile and margin: AUC and F1 of `n_cells` |
+| `so_cfar_prototype.csv` | per online-detector variant: AUC, F1, F1 in bed and in the first 2 min |
 
 ## Bottlenecks
 
@@ -364,12 +442,11 @@ pie title Radar pass time per frame (person_1/scenario_1, 17.4 ms)
     "GPU, all 12 channels" : 1.0
 ```
 
-1. **Total activity energy is not validated.** With 148 recordings the radar and MoCap energies still rank recordings almost independently (Spearman 0.19, after limiting `p_r4` to the coverage). Possible next steps:
-   - keep only cells clearly above their floor (0.28 in a one-off check);
-   - compare energy per evaluated minute instead of the total;
-   - compare against the radial part of the MoCap motion;
-   - learn a mapping from radar to MoCap energy, leaving the person out;
-   - correct the radar energy for distance and angle.
+1. **Total activity energy depends on the angle pass.**
+   - The points come from a second read of the raw data (6.9 h, 25 GB).
+   - They are chosen with the global noise floor, so the energy is not online yet.
+   - The person is found as the points within 1 m of the frame's median position, which assumes one person in the room: the caregiver visit stays excluded.
+   - A person-dependent scale remains for a few people (person_26 −30%, person_8 +21%).
 
 2. **Time alignment depends on MoCap.** The radar log has the start only to the second, and a 1 s error ruins the comparison, so every recording needs its own fitted offset. That needs MoCap motion in the recording. A recording without usable MoCap would have to use the typical offset (0.5 s, 10th–90th percentile 0.2–0.9 s). Any earlier result built on the legacy timing should be redone.
 
@@ -380,7 +457,7 @@ pie title Radar pass time per frame (person_1/scenario_1, 17.4 ms)
 
    These periods are excluded from the evaluation. A deployed system would face the same problem: separating people needs the angle information (product 3 in SCOPE.md).
 
-4. **Signal level depends on position, not only on movement.** Power falls about 8 dB from under 2 m to 4–5 m. Range correction recovers about 4.5 dB of that; the antenna pattern, and later the angle, would be needed for the rest. Counting cells above each recording's own floor (`n_cells`) detects activity well but depends even more on distance, so it can't serve as the energy measure.
+4. **Signal level depends on position, not only on movement.** Moving power falls about 8 dB from under 2 m to 4–5 m, and `n_cells` 10 times. The active/inactive call copes with it, because its threshold sits low. The energy avoids it by averaging over the person's own points instead of summing power or counting cells.
 
 5. **The radar errs towards "active" in bed and is person-dependent.**
    - In bed, close to the radar, it calls 0.1–0.2 more epochs active than MoCap across the lying and turning labels. MoCap under a blanket may also be the cause (not checked).
@@ -405,10 +482,14 @@ pie title Radar pass time per frame (person_1/scenario_1, 17.4 ms)
 | Evaluation window | exclude caregiver and operator periods, and times outside radar coverage |
 | Recordings whose alignment fails (margin < 0.1) | left out of the evaluation |
 | Channels | always all 12 |
-| Scores | AUC and F1 per epoch; error in minutes per recording; Spearman only for energy |
+| Total activity energy | from the point cloud: mean squared radial speed of the person's points (`e_body`). Range-Doppler energies (r⁴-corrected power, `v_rms`²) rejected |
+| MoCap tracking jumps | epochs with an RMS joint speed above 3 m/s are not valid |
+| Detection of moving cells | online: running 20th percentile per cell (τ = 2 min) + 2D SO-CFAR, k = 4.5 dB (§2). Until it is in the pipeline, the results use the global 20th percentile + 6 dB |
+| Scores | AUC and F1 per epoch; error in minutes per recording; for energy, Spearman and the error after a conversion to MoCap units fitted leaving the person out |
 
 Still open:
-- **Total activity energy:** how to make the radar estimate track MoCap (Bottleneck 1).
+- **Energy online:** choose the point cloud's cells with the online detector, not the global floor (Bottleneck 1).
+- **Online detector in the pipeline:** it keeps state from frame to frame, so it has to run as a streaming feature (`n_det`) rather than in the whole-recording feature code. The benefit of the clutter map against persistent moving clutter is still to be shown.
 - **Energy reference:** the MoCap energy is currently whole-body (mean squared joint speed over all joints and all three directions). The radial part (`vr2`, motion along the line to the radar) is computed as a diagnostic, not used.
 
 ## Reproducing
@@ -416,8 +497,12 @@ Still open:
 ```bash
 PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3
 CUDA_VISIBLE_DEVICES=0 $PY scripts/radar_pass.py                 # all January recordings, ~7 h
+$PY scripts/angle_pass.py --device cpu --threads 8              # points for the energy, ~7 h (docs/angle.md)
 $PY scripts/calibrate_mocap_threshold.py                         # MoCap + labels of all recordings, ~15 min
 $PY scripts/evaluate_category1.py --workers 16                   # ~15 min the first time
+$PY scripts/plot_per_person.py                                   # AUC, F1 and energy error per person
+$PY scripts/sensitivity_floor.py --workers 16                    # global floor: percentile x margin, ~10 min
+$PY scripts/prototype_so_cfar.py --workers 16                    # online detector variants, ~10 min
 $PY scripts/plot_agreement.py --only person_10/scenario_2        # radar vs MoCap over time, any recording
 $PY scripts/fit_radar_position.py --only person_1/scenario_1 person_5/scenario_3 person_10/scenario_2
 $PY scripts/plot_timeline.py person_1/scenario_1                 # diagnostic

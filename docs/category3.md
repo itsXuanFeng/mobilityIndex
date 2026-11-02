@@ -383,7 +383,7 @@ Machine and env: `barabas`, `distrimuse` conda env. The evaluation spends most o
 
 **Inputs and code version.**
 - **Inputs:** the Category 1 recordings and thresholds (`output/category1/thresholds.csv`), the MoCap posture rule (`output/groundtruth/posture_rule.csv`), and the angle-pass points.
-- **Code:** the runs used the working tree on top of commit `ac098d0`. Neither the Category 2 nor the Category 3 code, nor the angle pass, is committed yet; commit them to pin the version that produced these numbers.
+- **Code:** commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`) holds the code of these runs, including the angle pass.
 - **Effect on Categories 1–2:** none; the new MoCap signals and radar features are additions.
 
 **Tables in `output/groundtruth/`:**

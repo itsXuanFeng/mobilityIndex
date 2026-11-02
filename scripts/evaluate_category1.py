@@ -10,7 +10,9 @@ All thresholds are calibrated leave-one-subject-out. Writes to OUTPUT_ROOT/categ
     thresholds.csv     per recording: the radar and MoCap active thresholds used for it
     epoch_scores.csv   per feature and recording: AUC, F1
     metrics.csv        per recording: the Category 1 metrics, radar vs MoCap
-    agreement.csv      per metric across recordings: mean absolute error and bias (times), Spearman (energy)
+    agreement.csv      per metric across recordings: mean absolute error and bias (times); Spearman, and the error
+                       after a conversion to MoCap units fitted leaving the person out (energy)
+    per_person.csv     per person: AUC, F1 active, F1 inactive, energy error
     per_label.csv      per scripted activity: MoCap vs radar active share
     distance.csv       distance dependence of each feature
 """
@@ -31,9 +33,9 @@ from mobility.io.recordings import find_recordings, parse_recording  # noqa: E40
 from mobility.radar.cube import cube_path  # noqa: E402
 from mobility.session import load_session  # noqa: E402
 
-FEATURES = ['n_cells', 'p_r4', 'p_sub', 'v_rms']
+FEATURES = ['n_cells', 'p_sub', 'v_rms']
 ACTIVE_FEATURE = 'n_cells'     # decides active / inactive
-ENERGY_FEATURE = 'p_r4'        # total activity energy
+ENERGY_FEATURE = 'e_body'      # total activity energy: the person's points, from the angle pass
 POOR_ALIGNMENT = 0.1           # flag recordings whose alignment peak stands out less than this
 
 
@@ -127,6 +129,9 @@ if __name__ == '__main__':
     agreement = ev.metric_agreement(mt)
     agreement.to_csv(f'{out}/agreement.csv', index=False)
     print(f'\nper-recording metrics:\n{agreement.round(3).to_string(index=False)}')
+    pp = ev.per_person(table, ACTIVE_FEATURE, thresholds[ACTIVE_FEATURE], mt)
+    pp.to_csv(f'{out}/per_person.csv', index=False)
+    print(f'\nper person:\n{pp.round(3).to_string(index=False)}')
     times = mt[mt.metric == 'active_time']
     print(f'active time per recording: MoCap {spread(times.mocap)} min, radar {spread(times.radar)} min')
 

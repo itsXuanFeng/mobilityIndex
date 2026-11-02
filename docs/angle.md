@@ -70,7 +70,7 @@ x, z and height of the radar's nearest moving reflector (orange) and the nearest
 
 ## Running it on the campaign
 
-Run on 2026-10-25 18:31 – 2026-10-26 01:28 on `barabas` with the first command below (`--device cpu --threads 8`; both GPUs were busy with other jobs). Result: 156 of 156 recordings, no failures; 1,601,282 frames read (the 26,231 missing frames are those missing from the cube too: person_101/scenario_100 frames 0–26,214, person_23/scenario_5 frames 858–873); 120 frames skipped as damaged, the same as in the cube; 447 M points, 25 GB.
+Run on 2026-10-25 18:31 – 2026-10-26 01:28 on `barabas` with the first command below (`--device cpu --threads 8`; both GPUs were busy with other jobs). Result: 156 of 156 recordings, no failures; 1,601,282 frames read (the 26,231 missing frames are those missing from the cube too: person_101/scenario_100 frames 0–26,214, person_23/scenario_5 frames 858–873); 120 frames skipped as damaged, the same as in the cube; 447 M points, 25 GB. Code: commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`).
 
 ```bash
 PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3
@@ -92,6 +92,7 @@ Recordings run one after the other: the network is the limit, as for the cube pa
 
 ## Not done yet
 
+- **Used by Category 1** (2026-10-29): the total activity energy is `e_body`, the mean squared radial speed of the person's points per frame, also from `frame_features` ([category1.md](category1.md)).
 - **Used by Category 3** (2026-10-26): the person's top-of-body height and position per frame (`frame_features`, cached in `angle_features.npz`) give the posture per epoch, also while still, and the transitions ([category3.md](category3.md)). Still to do: separating the subject from a caregiver, to stop excluding the caregiver visit.
 - **One reflector per cell.** `phase` assumes it; where two body parts share a range-Doppler cell, `beam` (or a multi-snapshot method over neighbouring Doppler bins, as the colleague's MUSIC/ESPRIT) may do better.
 - **Checked on the 6 development recordings only.** One per layout, so the orientation is confirmed for every layout; the other 150 recordings are not checked one by one.

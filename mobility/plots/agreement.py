@@ -5,8 +5,8 @@ recording_figure   the whole recording: label classes, movement of both sensors,
                    distance to the radar
 episodes_figure    close-ups of typical episodes (chair, bed, floor) at frame resolution, with the label names
 
-Movement is shown as the z-score of log energy (radar: distance-corrected moving power p_r4; MoCap: whole-body mean
-squared joint speed). The two have different units, so each is standardised over the evaluated epochs of the recording
+Movement is shown as the z-score of log energy (radar: mean squared radial speed of the person's points, e_body;
+MoCap: whole-body mean squared joint speed). The two have different units, so each is standardised over the evaluated epochs of the recording
 and they share one axis without a second scale.
 """
 import matplotlib.pyplot as plt
@@ -44,7 +44,7 @@ SHORT = {  # label -> short name, for the close-ups
 CLASS_COLOUR = {ACTIVE: style.ACTIVE, INACTIVE: style.INACTIVE}
 
 SERIES = [plt.Line2D([], [], color=style.MOCAP, label='MoCap: whole-body movement'),
-          plt.Line2D([], [], color=style.RADAR, label='Radar: distance-corrected moving power')]
+          plt.Line2D([], [], color=style.RADAR, label='Radar: movement of the person (point cloud)')]
 
 LEGEND = [  # the "active?" row
     Patch(facecolor=style.AGREE_ACTIVE, label='both active'),
@@ -138,7 +138,7 @@ def recording_figure(session, pairs, path):
     zm = _z(pairs.mocap_energy.values, ev)
     _hatch_unevaluated(ax[1], x, w, ev)
     ax[1].plot(x, zm, color=style.MOCAP, label='MoCap: whole-body movement')
-    ax[1].plot(x, zr, color=style.RADAR, label='Radar: distance-corrected moving power')
+    ax[1].plot(x, zr, color=style.RADAR, label='Radar: movement of the person (point cloud)')
     ax[1].set_ylabel('movement\n(z-score of log energy)')
 
     _strip(ax[2], x, w, _agreement_colours(pairs), 'active?')
@@ -182,7 +182,7 @@ def episodes_figure(session, pairs, path, episodes=EPISODES):
     spans = [(title, _episode_span(session.labels, a, b)) for title, a, b in episodes]
     spans = [(title, s) for title, s in spans if s is not None]
     win = session.masks['window']
-    zr = nan_smooth(_z(session.radar['p_r4'], win), FPS // 2)
+    zr = nan_smooth(_z(session.radar['e_body'], win), FPS // 2)
     zm = nan_smooth(_z(session.mocap['ke'], win), FPS // 2)
     widths = [s[1] - s[0] for _, s in spans]
     fig, ax = plt.subplots(3, len(spans), figsize=(13, 5.6), sharey='row', squeeze=False,
@@ -199,7 +199,7 @@ def episodes_figure(session, pairs, path, episodes=EPISODES):
         ax[0, c].set_title(title, pad=58)
         _hatch_unevaluated(ax[1, c], xe, 1, pairs.evaluated.values[e])
         ax[1, c].plot(xs, zm[f], color=style.MOCAP, label='MoCap: whole-body movement')
-        ax[1, c].plot(xs, zr[f], color=style.RADAR, label='Radar: distance-corrected moving power')
+        ax[1, c].plot(xs, zr[f], color=style.RADAR, label='Radar: movement of the person (point cloud)')
         ax[1, c].set_xlim(0, b - a)
         _strip(ax[2, c], xe, 1, _agreement_colours(pairs[e]), 'active?' if c == 0 else '')
         ax[2, c].set_xlim(0, b - a)

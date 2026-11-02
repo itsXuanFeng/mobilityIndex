@@ -13,8 +13,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..config import (ABOVE_FLOOR_DB, COVERAGE_RADIUS, FLOOR_PERCENTILE, MIN_RANGE, MIN_SPEED, RANGE_AXIS,
-                      VELOCITY_AXIS)
+from ..config import ABOVE_FLOOR_DB, FLOOR_PERCENTILE, MIN_RANGE, MIN_SPEED, RANGE_AXIS, VELOCITY_AXIS
 
 
 @dataclass
@@ -86,17 +85,6 @@ def compute_features(cube, names=None, chunk=2000, floor_db=None):
 def p_sub(c):
     """moving power above the noise floor, summed over range and Doppler"""
     return c.excess.sum((1, 2))
-
-
-# range^4 weight, zero beyond the radar coverage: there the subject never is, and the weight would amplify noise
-R4 = (np.maximum(RANGE_AXIS, 0.5) ** 4 * (RANGE_AXIS <= COVERAGE_RADIUS))[:, None]
-
-
-@feature('p_r4')
-def p_r4(c):
-    """p_sub within COVERAGE_RADIUS, each range bin weighted by range^4 (received power falls ~1/r^4):
-    distance-corrected movement energy"""
-    return (c.excess * R4).sum((1, 2))
 
 
 @feature('n_cells')

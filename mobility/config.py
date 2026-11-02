@@ -49,5 +49,6 @@ COVERAGE_RADIUS = 5.0             # subject CoG farther than this from the radar
 EPOCH_S = 1.0
 # MoCap active / inactive: RMS joint speed above a threshold calibrated against the activity labels, leaving the
 # person out (scripts/calibrate_mocap_threshold.py, mobility/labels.py); not set by hand
+MAX_MOCAP_RMS = 3.0               # m/s: an epoch with a higher RMS joint speed is a MoCap tracking jump, not movement
 LABEL_MARGIN_S = 2.0              # time between labels counts as waiting (inactive) only this far from any label
 ALIGN_SEARCH_S = (-15.0, 15.0)    # fine time offset searched around the logged capture start

@@ -23,7 +23,7 @@ def _maps(cube, step=5, chunk=2000):
     return rng, dop, T
 
 
-def timeline(session, path, features=('p_sub', 'p_r4'), count_feature='n_cells'):
+def timeline(session, path, features=('p_sub', 'e_body'), count_feature='n_cells'):
     """labels, MoCap speed and window, radar features, range-time and Doppler-time maps with MoCap overlays"""
     s = session
     tt = s.t - s.t[0]
