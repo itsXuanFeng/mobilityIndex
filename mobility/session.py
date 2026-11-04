@@ -127,8 +127,9 @@ def load_session(person, scenario, overwrite=False):
     care = caregiver_period(lb)
     no_caregiver = ~((t >= care[0]) & (t <= care[1])) if care else np.ones(T, bool)
     no_data = np.isnan(radar['p_sub'])
-    if 'e_body' in radar:                             # 0 means "nothing seen moving", not "no data"
-        radar['e_body'] = np.where(no_data, np.nan, radar['e_body'])
+    for k in ('e_body', 'v_horiz', 'e_move'):         # 0 means "nothing seen moving", not "no data"
+        if k in radar:
+            radar[k] = np.where(no_data, np.nan, radar[k])
     masks = dict(has_mocap=has_mocap, covered=covered, in_script=in_script, no_caregiver=no_caregiver,
                  window=has_mocap & covered & in_script & no_caregiver & ~no_data)
     return Session(person, scenario, t, radar, gt, lb, masks, al)

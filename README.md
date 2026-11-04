@@ -6,7 +6,7 @@ Mobility metrics in three categories, computed from the ceiling FMCW radar and v
 | Category | Metrics | Status |
 |---|---|---|
 | 1. Total movement volume | total activity energy, active time, inactive time | active / inactive time validated on 148 recordings; energy open |
-| 2. Activity bout structure | bout count, bout duration (mean, variance), fragmentation | done, validated on 148 recordings; bout rule calibrated against the labels |
+| 2. Activity bout structure | bout count, bout duration (mean, variance), fragmentation | done, validated on 148 recordings; exit and confirmation thresholds calibrated against the labels |
 | 3. Postural transitions | peak transition Doppler, sit-to-stand, stand-to-sit, lie-to-sit; time standing, sitting, lying, on the floor | with the angle: posture per epoch F1 0.92, posture times within 0.1 min; transitions F1 0.77 (height rule); peak Doppler within 0.22 m/s on matched sit-to-stand / stand-to-sit; counts fixed by the script |
 
 ## Pipeline
@@ -42,7 +42,7 @@ mobility/                  the package
     features.py            per-frame features, @feature registry
   groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed, posture signals; active threshold
   labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
-  bouts.py                 bout rule (gap filling, minimum bout) on an active / inactive sequence; its calibration
+  bouts.py                 bout definition (hysteresis, confirmation, gap filling, minimum bout); its calibration
   posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar height rule
   transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier (comparison)
   align.py                 time offset radar <-> MoCap, radar position fit
@@ -71,7 +71,8 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/radar_pass.py --only person_1/scenario_1 pers
 $PY scripts/calibrate_mocap_threshold.py
 # 3. Category 1 evaluation on every recording that has a cube
 $PY scripts/evaluate_category1.py
-# 4. Category 2: bout rule calibrated against the labels (MoCap + labels only), then the evaluation (needs step 3)
+# 4. Category 2: MoCap bout definition calibrated against the labels (MoCap + labels only), then the evaluation
+#    (needs step 3; calibrates the radar exit and confirmation thresholds)
 $PY scripts/calibrate_bout_rule.py
 $PY scripts/evaluate_category2.py --workers 16
 # 5. Category 3: MoCap posture rule calibrated against the script (MoCap + labels only), then the evaluation
@@ -99,7 +100,7 @@ Outputs, under `output/`:
 | `<person>/<scenario>/points.npz`, `points_info.json` | angle pass: per-channel complex values of the cells > 6 dB above their floor, ~170 MB |
 | `<person>/<scenario>/features.npz`, `subject.json`, `mocap_50hz.npz`, `alignment.json` | session cache |
 | `groundtruth/mocap_active_threshold.csv` | MoCap active threshold per left-out person (and `ALL`) |
-| `groundtruth/bout_rule.csv` | bout rule per left-out person (and `ALL`) |
+| `groundtruth/bout_rule.csv` | MoCap exit and confirmation factors and bout rule per left-out person (and `ALL`) |
 | `groundtruth/posture_rule.csv` | MoCap posture rule per left-out person (and `ALL`) |
 | `category1/*.csv`, `category2/*.csv`, `category3/*.csv` | evaluation tables |
 | `plots/agreement/`, `plots/bouts/`, `plots/transitions/`, `plots/angle/`, `plots/` | radar vs MoCap over time; bouts; transitions; angle check; diagnostic timelines |
@@ -126,7 +127,7 @@ def longest_bout(s):
     return float(_durations(s).max())        # helpers of the category's module
 ```
 
-It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule from `States.extra['bout_rule']`, which `metric_table(..., bout_rules=...)` sets. Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
+It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule and the exit and confirmation thresholds from `States.extra['bout_rule']`, `['exit_threshold']` and `['confirm_threshold']`, which `metric_table(..., bout_rules=..., bout_levels=...)` sets. Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
 
 **State a metric needs**: add a field to `States` in `mobility/states.py` and fill it in both `radar_states` and `mocap_states` (per epoch), or set it in `metric_table` (events, like `transitions`).
 

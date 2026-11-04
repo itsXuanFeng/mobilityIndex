@@ -43,9 +43,10 @@ def feature_level(session, name, n=None):
     return epoch_mean(log_level(x) if FEATURES[name].log else x, n)
 
 
-def radar_states(session, threshold, active_feature='n_cells', energy_feature='e_body', window='window'):
+def radar_states(session, threshold, active_feature='n_cells', energy_feature='e_move', window='window'):
     """active when the epoch level of active_feature exceeds threshold (calibrated against MoCap); energy from
-    energy_feature (e_body: mean squared radial speed of the person's points, from the angle pass)"""
+    energy_feature (e_move: mean squared radial speed of the person's points plus their horizontal speed squared,
+    from the angle pass)"""
     n, t, valid = _epochs(session, window)
     level = feature_level(session, active_feature, n)
     energy = epoch_mean(session.radar[energy_feature], n)

@@ -143,7 +143,22 @@ TOP_QUANTILE = 0.9         # top of the body: this quantile of the person's poin
 # peak Doppler: power-weighted quantiles of the person's moving speeds; which one is calibrated against MoCap
 PEAK_QUANTILES = (0.9, 0.95, 0.98, 0.99, 0.995)
 PEAK_FEATURES = tuple(f'v_q{round(q * 1000)}' for q in PEAK_QUANTILES)
-ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body') + PEAK_FEATURES
+ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body', 'v_horiz', 'e_move'
+                  ) + PEAK_FEATURES
+
+
+def horizontal_speed(x, z, fps):
+    """(T,) horizontal speed (m/s) of the person's track (x_person, z_person); 0 where the person isn't seen. The
+    track jumps between body parts and jitters, so: 0.5 s running median, 1 s running mean, displacement over 1 s."""
+    import pandas as pd
+    from ..utils import nan_smooth
+    half = fps // 2
+    pos = np.stack([nan_smooth(pd.Series(c).rolling(half + 1, center=True, min_periods=half // 2 + 1).median().values,
+                               fps) for c in (x, z)], 1)
+    d = np.full_like(pos, np.nan)
+    d[half:-half] = pos[2 * half:] - pos[:-2 * half]
+    v = np.hypot(d[:, 0], d[:, 1]) / (2 * half / fps)
+    return np.where(np.isnan(v), 0.0, v)
 
 
 def frame_features(points, floor_db, n_frames):
@@ -155,7 +170,10 @@ def frame_features(points, floor_db, n_frames):
         n_person    number of the person's points;  n_slow: of them, slower than MIN_SPEED (still)
         e_body      movement energy of the person (m^2/s^2): mean squared radial speed over all their points, still
                     ones (slow bins, breathing) included, as the MoCap energy averages over all joints. 0 where the
-                    person isn't seen: nothing is seen moving. Category 1's total activity energy
+                    person isn't seen: nothing is seen moving
+        v_horiz     horizontal speed of the person (m/s), from their position track (horizontal_speed)
+        e_move      e_body + v_horiz^2: the radial speeds of the points plus the horizontal motion of the whole
+                    body, which a ceiling radar barely sees radially. Category 1's total activity energy
         v_q900 ... v_q995    speed of the person (m/s, along the line to the radar): the power-weighted quantile
                     PEAK_QUANTILES of the |velocity| of their moving points. A high quantile, not the fastest cell:
                     a strong reflection leaks power into neighbouring Doppler bins, and the fastest cell above the
@@ -165,9 +183,9 @@ def frame_features(points, floor_db, n_frames):
     The caregiver and operator would also be seen: their periods are outside the evaluation window.
     """
     import pandas as pd
-    from ..config import COVERAGE_RADIUS, MIN_SPEED, ROOM_MAX_X, VELOCITY_AXIS
+    from ..config import COVERAGE_RADIUS, FPS, MIN_SPEED, ROOM_MAX_X, VELOCITY_AXIS
     out = {k: np.full(n_frames, np.nan) for k in ANGLE_FEATURES}
-    out['n_person'][:] = out['n_slow'][:] = out['e_body'][:] = 0
+    out['n_person'][:] = out['n_slow'][:] = out['e_body'][:] = out['v_horiz'][:] = out['e_move'][:] = 0
     strong = points['db'].astype(np.float32) > floor_db[points['rbin'], points['dbin']] + STRONG_DB
     p = localise({k: v[strong] for k, v in points.items()})
     ok = ((RANGE_AXIS[p['rbin']] <= COVERAGE_RADIUS) & (p['x'] < ROOM_MAX_X) & (p['y'] > -0.3)
@@ -190,6 +208,8 @@ def frame_features(points, floor_db, n_frames):
     out['h_top'][f] = g.y.quantile(TOP_QUANTILE).loc[f].values
     out['x_person'][f] = centre.x.loc[f].values
     out['z_person'][f] = centre.z.loc[f].values
+    out['v_horiz'] = horizontal_speed(out['x_person'], out['z_person'], FPS)
+    out['e_move'] = out['e_body'] + out['v_horiz'] ** 2
     mv = person[~person.slow & person.frame.isin(f)].sort_values(['frame', 'speed'])
     if len(mv):
         frac = mv.groupby('frame').power.cumsum() / mv.groupby('frame').power.transform('sum')

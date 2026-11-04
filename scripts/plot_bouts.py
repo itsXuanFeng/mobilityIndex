@@ -1,6 +1,6 @@
 """
 Activity bouts of the radar and of MoCap over time, per recording (mobility/plots/bouts.py). Uses the thresholds and
-bout rules of the Category 2 evaluation: run scripts/evaluate_category2.py first.
+bout definitions of the Category 2 evaluation: run scripts/evaluate_category2.py first.
 
     python scripts/plot_bouts.py                                       # every evaluated recording
     python scripts/plot_bouts.py --only person_10/scenario_2 person_15/scenario_4
@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.bouts import BoutRule  # noqa: E402
 from mobility.config import EPOCH_S, OUTPUT_ROOT  # noqa: E402
-from mobility.evaluation import add_bouts, epoch_pairs  # noqa: E402
+from mobility.evaluation import bout_frame, paired_states, set_bout_levels  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
 from mobility.plots.bouts import bouts_figure  # noqa: E402
 from mobility.session import load_session  # noqa: E402
@@ -32,10 +32,14 @@ if __name__ == '__main__':
     os.makedirs(out, exist_ok=True)
     for rec in recs:
         r, b = th.loc[rec], rules.loc[rec]
-        rule = BoutRule(int(round(b.max_gap_s / EPOCH_S)), int(round(b.min_bout_s / EPOCH_S)))
         s = load_session(*parse_recording(rec))
-        pairs = add_bouts(epoch_pairs(s, r.radar_threshold, r.mocap_threshold, r.active_feature, r.energy_feature),
-                          rule)
+        rs, ms = paired_states(s, r.radar_threshold, r.mocap_threshold, active_feature=r.active_feature,
+                               energy_feature=r.energy_feature)
+        rule = BoutRule(int(round(b.max_gap_s / EPOCH_S)), int(round(b.min_bout_s / EPOCH_S)))
+        rs.extra['bout_rule'] = ms.extra['bout_rule'] = rule
+        set_bout_levels(rs, ms, (b.radar_exit, b.radar_confirm), (b.mocap_exit, b.mocap_confirm))
+        note = (f'MoCap exit {b.mocap_exit_factor:g}x, confirm {b.mocap_confirm_factor:g}x entry; radar exit '
+                f'-{b.radar_exit_delta:g}, confirm +{b.radar_confirm_eps:g}; {rule}. ')
         path = os.path.join(out, f'{s.person}_{s.scenario}_bouts.png')
-        bouts_figure(s, pairs, rule, path)
+        bouts_figure(s, bout_frame(rs, ms), path, note)
         print(path)

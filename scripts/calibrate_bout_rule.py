@@ -1,18 +1,21 @@
 """
-Calibrate the bout rule (mobility/bouts.py: fill gaps up to max_gap, drop bouts shorter than min_bout) against the
-activity labels, on the MoCap active sequence of every recording with MoCap and labels. No radar data is needed.
+Calibrate the MoCap bout definition (mobility/bouts.py: hysteresis down to exit_factor x the active threshold,
+confirmation at confirm_factor x the active threshold, fill gaps up to max_gap, drop bouts shorter than min_bout)
+against the activity labels, on the MoCap joint speed of every
+recording with MoCap and labels. No radar data is needed.
 Needs OUTPUT_ROOT/groundtruth/mocap_epochs.csv and mocap_active_threshold.csv: run scripts/calibrate_mocap_threshold.py
 first.
 
-For every person: the rule that best separates active from inactive label epochs of all *other* persons (balanced
-accuracy), with MoCap active defined by that person's fold threshold, and how well it does on that person (F1 against
-the labels, before and after the rule). 'ALL' (every person) is for people outside the calibration.
+For every person: the combination that best separates active from inactive label epochs of all *other* persons
+(balanced accuracy), with MoCap active defined by that person's fold threshold, and how well it does on that person
+(F1 against the labels, before and after). 'ALL' (every person) is for people outside the calibration.
 
     python scripts/calibrate_bout_rule.py
 
 Writes OUTPUT_ROOT/groundtruth/:
-    bout_rule.csv        person, max_gap_s, min_bout_s, training balanced accuracy, held-out F1 before / after
-    bout_rule_grid.csv   every candidate rule, all persons: label epochs in and out of bouts, balanced accuracy, F1
+    bout_rule.csv        person, mocap_exit_factor, mocap_confirm_factor, max_gap_s, min_bout_s, training balanced
+                         accuracy, held-out F1 before (no hysteresis, no confirmation, no rule) / after
+    bout_rule_grid.csv   every candidate, all persons: label epochs in and out of bouts, balanced accuracy, F1
 """
 import os
 import sys
@@ -24,6 +27,8 @@ from mobility.bouts import BOUT_RULE_FILE, balanced_accuracy, calibrate_bout_rul
 from mobility.config import EPOCH_S, GROUNDTRUTH_DIR  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds  # noqa: E402
 from mobility.io.recordings import natural_key  # noqa: E402
+
+KEYS = ['exit_factor', 'confirm_factor', 'max_gap', 'min_bout']
 
 
 def f1(c):
@@ -39,26 +44,29 @@ if __name__ == '__main__':
 
     rows = []
     for person in persons + [None]:
-        rule, ba = calibrate_bout_rule(conf, exclude_person=person)
-        row = dict(person=person or 'ALL', max_gap_s=rule.max_gap * EPOCH_S, min_bout_s=rule.min_bout * EPOCH_S,
-                   train_balanced_accuracy=ba)
+        rule, f_exit, f_conf, ba = calibrate_bout_rule(conf, exclude_person=person)
+        row = dict(person=person or 'ALL', mocap_exit_factor=f_exit, mocap_confirm_factor=f_conf,
+                   max_gap_s=rule.max_gap * EPOCH_S, min_bout_s=rule.min_bout * EPOCH_S, train_balanced_accuracy=ba)
         if person:
-            held = conf[(conf.fold == person) & (conf.person == person)].groupby(['max_gap', 'min_bout'])[
-                ['tp', 'fn', 'tn', 'fp']].sum()
-            row.update(f1_before=f1(held.loc[(0, 1)]), f1_after=f1(held.loc[(rule.max_gap, rule.min_bout)]))
+            held = conf[(conf.fold == person) & (conf.person == person)].groupby(KEYS)[['tp', 'fn', 'tn', 'fp']].sum()
+            row.update(f1_before=f1(held.loc[(1.0, 1.0, 0, 1)]),
+                       f1_after=f1(held.loc[(f_exit, f_conf, rule.max_gap, rule.min_bout)]))
         rows.append(row)
     out = pd.DataFrame(rows)
     out.to_csv(BOUT_RULE_FILE, index=False)
     print(f'rule per left-out person:\n{out.round(4).to_string(index=False)}')
     held = out[out.person != 'ALL']
-    print(f'\nheld-out F1 against the labels, median [min-max]: before the rule {held.f1_before.median():.3f} '
+    defs = out.groupby(['mocap_exit_factor', 'mocap_confirm_factor', 'max_gap_s', 'min_bout_s']).size()
+    print(f'(exit, confirmation, max_gap_s, min_bout_s): number of folds {defs.to_dict()}')
+    print(f'\nheld-out F1 against the labels, median [min-max]: before {held.f1_before.median():.3f} '
           f'[{held.f1_before.min():.3f}-{held.f1_before.max():.3f}], after {held.f1_after.median():.3f} '
           f'[{held.f1_after.min():.3f}-{held.f1_after.max():.3f}]')
 
     a = conf[conf.fold == 'ALL']
-    grid = a.groupby(['max_gap', 'min_bout'])[['tp', 'fn', 'tn', 'fp']].sum()
+    grid = a.groupby(KEYS)[['tp', 'fn', 'tn', 'fp']].sum()
     grid = grid.assign(balanced_accuracy=balanced_accuracy(grid), f1=f1(grid))
     grid.reset_index().to_csv(os.path.join(GROUNDTRUTH_DIR, 'bout_rule_grid.csv'), index=False)
-    print(f'\nbalanced accuracy over the grid (all persons; rows max_gap, columns min_bout, epochs):\n'
-          f'{grid.balanced_accuracy.unstack().round(3).to_string()}')
+    best = grid.balanced_accuracy.groupby(['confirm_factor', 'exit_factor']).max().unstack()
+    print(f'\nbalanced accuracy, all persons (rows confirmation factor, columns exit factor; best max_gap, min_bout):'
+          f'\n{best.round(4).to_string()}')
     print(f'written {BOUT_RULE_FILE}')

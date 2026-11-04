@@ -13,7 +13,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.metrics import f1_score, roc_auc_score
 
-from .bouts import in_bouts, runs
+from .bouts import hysteresis, in_bouts, runs
 from .config import EPOCH_S, FPS
 from .labels import label_class
 from .metrics import METRICS, compute_metrics
@@ -40,7 +40,7 @@ def epoch_table(sessions, features, gt_thresholds):
     return pd.concat(out, ignore_index=True)
 
 
-def epoch_pairs(session, radar_threshold, mocap_threshold, active_feature='n_cells', energy_feature='e_body'):
+def epoch_pairs(session, radar_threshold, mocap_threshold, active_feature='n_cells', energy_feature='e_move'):
     """per 1 s epoch over the whole recording, the Category 1 states side by side: movement energy and active call
     of the radar and of MoCap, whether the epoch is evaluated, its label and label class, distance to the radar"""
     n = int(round(EPOCH_S * FPS))
@@ -77,25 +77,39 @@ def epoch_scores(table, feature, thresholds):
     return pd.DataFrame(rows)
 
 
-def metric_table(sessions, thresholds, gt_thresholds, category=None, bout_rules=None, transitions=None, postures=None,
-                 **radar_kw):
+def paired_states(session, radar_threshold, mocap_threshold, **radar_kw):
+    """radar and MoCap States of one recording, valid on the same epochs"""
+    rs = radar_states(session, radar_threshold, **radar_kw)
+    ms = mocap_states(session, active_speed=mocap_threshold)
+    rs.valid = ms.valid = rs.valid & ms.valid
+    return rs, ms
+
+
+def metric_rows(name, rs, ms, category=None):
+    """per metric: radar and MoCap value of one recording"""
+    rad, moc = compute_metrics(rs, category), compute_metrics(ms, category)
+    return [dict(rec=name, metric=k, unit=METRICS[k].unit, radar=rad[k], mocap=moc[k]) for k in rad]
+
+
+def metric_table(sessions, thresholds, gt_thresholds, category=None, bout_rules=None, bout_levels=None,
+                 transitions=None, postures=None, **radar_kw):
     """per recording and metric: radar value (with that recording's threshold) and MoCap value. Category 2 needs
-    bout_rules: {person: BoutRule calibrated without that person}. Category 3 needs transitions: {recording:
-    (radar events, MoCap events)} (mobility.transitions) and postures: {recording: (radar, MoCap) posture per epoch}."""
+    bout_rules: {person: BoutRule calibrated without that person} and bout_levels: {recording: ((radar exit, radar
+    confirmation), (MoCap exit, MoCap confirmation)) thresholds} (see set_bout_levels). Category 3 needs transitions:
+    {recording: (radar events, MoCap events)} (mobility.transitions) and postures: {recording: (radar, MoCap) posture
+    per epoch}."""
     rows = []
     for s in sessions:
-        rs = radar_states(s, thresholds[s.name], **radar_kw)
-        ms = mocap_states(s, active_speed=gt_thresholds[s.person])
-        rs.valid = ms.valid = rs.valid & ms.valid          # the same epochs on both sides
+        rs, ms = paired_states(s, thresholds[s.name], gt_thresholds[s.person], **radar_kw)
         if bout_rules is not None:
             rs.extra['bout_rule'] = ms.extra['bout_rule'] = bout_rules[s.person]
+        if bout_levels is not None:
+            set_bout_levels(rs, ms, *bout_levels[s.name])
         if transitions is not None:
             rs.transitions, ms.transitions = transitions[s.name]
         if postures is not None:
             rs.posture, ms.posture = (p[:len(rs.t)] for p in postures[s.name])
-        rad, moc = compute_metrics(rs, category), compute_metrics(ms, category)
-        for k in rad:
-            rows.append(dict(rec=s.name, metric=k, unit=METRICS[k].unit, radar=rad[k], mocap=moc[k]))
+        rows += metric_rows(s.name, rs, ms, category)
     return pd.DataFrame(rows)
 
 
@@ -171,12 +185,54 @@ def distance_residuals(table, feature, bins=(0, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0)):
 # ---- Category 2: bouts ----
 
 BOUT_MATCH_IOU = 0.5   # a radar bout and a MoCap bout match when they overlap by at least this intersection over union
+RADAR_EXIT_DELTAS = (0, 0.1, 0.2, 0.3, 0.4)                       # radar exit = entry - delta, on its log10 level
+RADAR_CONFIRM_EPS = (0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0)   # radar confirmation = entry + eps
 
 
-def add_bouts(pairs, rule):
-    """epoch_pairs plus whether each epoch is inside a radar bout and inside a MoCap bout (on the evaluated epochs)"""
-    return pairs.assign(radar_bout=in_bouts(pairs.radar_active.values, pairs.evaluated.values, rule),
-                        mocap_bout=in_bouts(pairs.mocap_active.values, pairs.evaluated.values, rule))
+def set_bout_levels(rs, ms, radar, mocap):
+    """the Category 2 level thresholds of each sensor: radar and mocap are (exit, confirmation) thresholds"""
+    rs.extra['exit_threshold'], rs.extra['confirm_threshold'] = radar
+    ms.extra['exit_threshold'], ms.extra['confirm_threshold'] = mocap
+
+
+def bout_frame(rs, ms):
+    """per epoch of one recording (States with the bout rule and the bout levels set): the Category 1 active calls and
+    whether the epoch is inside a radar bout and inside a MoCap bout"""
+    from .metrics.category2 import in_bout
+    return pd.DataFrame(dict(t=rs.t, radar_active=rs.active, mocap_active=ms.active, radar_bout=in_bout(rs),
+                             mocap_bout=in_bout(ms), evaluated=rs.valid & ms.valid))
+
+
+def _bouts(level, valid, entry, exit_threshold, confirm_threshold, rule):
+    return runs(in_bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold), valid, rule))
+
+
+def loso_radar_bout_levels(states, radar_thr, mocap_thr, mocap_factors, rules, deltas=RADAR_EXIT_DELTAS,
+                           eps=RADAR_CONFIRM_EPS):
+    """radar exit and confirmation thresholds (entry - delta, entry + eps on the log10 level), leaving the person
+    out: for each person p, the pair whose bout count is closest to the MoCap bout count (sum of absolute differences)
+    on the other persons' recordings. As for the active thresholds, those recordings use p's fold: radar entry
+    radar_thr[p]; MoCap entry mocap_thr[p], exit and confirmation mocap_factors[p] x mocap_thr[p]; bout rule rules[p].
+    states: [(person, radar States, MoCap States)]. Ties: the smallest eps, then the smallest delta.
+    Returns ({person: (delta, eps)}, DataFrame of the training count error and bout F1 per person and pair)."""
+    out, rows = {}, []
+    for p in sorted({q for q, _, _ in states}):
+        f_exit, f_conf = mocap_factors[p]
+        train = [(rs, ms, _bouts(ms.level, ms.valid, mocap_thr[p], f_exit * mocap_thr[p], f_conf * mocap_thr[p],
+                                 rules[p])) for q, rs, ms in states if q != p]
+        err = {}
+        for e in eps:
+            for d in deltas:
+                n_m = n_r = hit = abs_err = 0
+                for rs, ms, mb in train:
+                    rb = _bouts(rs.level, rs.valid, radar_thr[p], radar_thr[p] - d, radar_thr[p] + e, rules[p])
+                    n_m, n_r, hit = n_m + len(mb), n_r + len(rb), hit + len(match_bouts(mb, rb))
+                    abs_err += abs(len(rb) - len(mb))
+                err[(d, e)] = abs_err
+                rows.append(dict(person=p, delta=d, eps=e, count_abs_err=abs_err / len(train),
+                                 bout_f1=2 * hit / (n_m + n_r)))
+        out[p] = min(err, key=lambda k: (err[k], k[1], k[0]))
+    return out, pd.DataFrame(rows)
 
 
 def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
@@ -199,9 +255,10 @@ def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
     return out
 
 
-def bout_events(pairs, epoch_s=EPOCH_S, min_iou=BOUT_MATCH_IOU):
-    """every bout of both sensors in one recording (pairs from add_bouts): start and end (s since the first epoch),
-    duration, whether it is matched, and for matched bouts the onset and offset error (radar - MoCap, s)"""
+def bout_events(pairs, epoch_s=EPOCH_S, min_iou=BOUT_MATCH_IOU, labels=None):
+    """every bout of both sensors in one recording (pairs from bout_frame): start and end (s since the first epoch),
+    duration, whether it is matched, for matched bouts the onset and offset error (radar - MoCap, s), and with labels
+    (one per epoch) the label at the middle of the bout"""
     t0 = pairs.t.values[0]
     rb, mb = runs(pairs.radar_bout.values), runs(pairs.mocap_bout.values)
     m = match_bouts(mb, rb, min_iou)
@@ -209,13 +266,14 @@ def bout_events(pairs, epoch_s=EPOCH_S, min_iou=BOUT_MATCH_IOU):
     for src, b, partner in (('mocap', mb, m), ('radar', rb, {j: i for i, j in m.items()})):
         for i, (s, e) in enumerate(b):
             row = dict(source=src, start_s=pairs.t.values[s] - t0, end_s=pairs.t.values[e - 1] - t0 + epoch_s,
-                       duration_s=(e - s) * epoch_s, matched=i in partner)
+                       duration_s=(e - s) * epoch_s, matched=i in partner,
+                       label=labels[(s + e - 1) // 2] if labels is not None else '')
             if i in partner and src == 'radar':
                 ms, me = mb[partner[i]]
                 row.update(onset_err_s=(s - ms) * epoch_s, offset_err_s=(e - me) * epoch_s)
             rows.append(row)
     return pd.DataFrame(rows, columns=['source', 'start_s', 'end_s', 'duration_s', 'matched', 'onset_err_s',
-                                       'offset_err_s'])
+                                       'offset_err_s', 'label'])
 
 
 def bout_scores(pairs, events):

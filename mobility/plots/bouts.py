@@ -3,7 +3,7 @@ Activity bouts of the radar and of MoCap over time (Category 2): the whole recor
 episode, where most bouts disagree.
 
 Per sensor, one row: its bouts as bars (solid = matched to a bout of the other sensor, outline = unmatched) above its
-active epochs before the bout rules (grey ticks).
+Category 1 active epochs (grey ticks), before the hysteresis, the confirmation and the bout rule.
 """
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +18,7 @@ LEGEND = [
     Patch(facecolor=style.MOCAP, label='MoCap bout, matched'),
     Patch(facecolor=style.RADAR, label='radar bout, matched'),
     Patch(facecolor=style.SURFACE, edgecolor=style.INK_2, label='bout without a match (outline)'),
-    Patch(facecolor=style.ACTIVE, label='active epoch, before the bout rules'),
+    Patch(facecolor=style.ACTIVE, label='active epoch (Category 1), before hysteresis, confirmation, rule'),
     Patch(facecolor=style.SURFACE, edgecolor=style.HATCH, hatch='////', label='not evaluated'),
 ]
 
@@ -53,8 +53,8 @@ def _rows(axes, session, pairs, t0, scale, names_until=None):
     return len(mb), len(rb), len(m)
 
 
-def bouts_figure(session, pairs, rule, path, episode=EPISODES[1]):
-    """pairs from mobility.evaluation.add_bouts; rule: the BoutRule used"""
+def bouts_figure(session, pairs, path, note='', episode=EPISODES[1]):
+    """pairs from mobility.evaluation.bout_frame; note: the bout definition used, for the subtitle"""
     style.apply()
     span = _episode_span(session.labels, episode[1], episode[2])
     fig, ax = plt.subplots(7 if span else 3, 1, figsize=(12, 6.4 if span else 3.2),
@@ -75,8 +75,8 @@ def bouts_figure(session, pairs, rule, path, episode=EPISODES[1]):
             a.tick_params(labelbottom=False)
     fig.suptitle(f'{session.person} / {session.scenario}: activity bouts, radar and MoCap', x=0.06, y=0.995,
                  ha='left', fontsize=12, fontweight='bold')
-    fig.text(0.06, 0.95, f'Bout rule (1 s epochs): {rule}. Bouts: MoCap {n_m}, radar {n_r}, matched {n_matched} '
-             f'(overlap >= 50% of their union).', fontsize=9, color=style.INK_2)
+    fig.text(0.06, 0.95, f'{note}Bouts: MoCap {n_m}, radar {n_r}, matched {n_matched}.', fontsize=9,
+             color=style.INK_2)
     fig.legend(handles=LEGEND, loc='lower center', ncol=3, bbox_to_anchor=(0.5, -0.01))
     fig.subplots_adjust(left=0.1, right=0.98, top=0.9, bottom=0.14)
     fig.savefig(path, dpi=110)

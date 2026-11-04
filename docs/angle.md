@@ -92,7 +92,7 @@ Recordings run one after the other: the network is the limit, as for the cube pa
 
 ## Not done yet
 
-- **Used by Category 1** (2026-10-29): the total activity energy is `e_body`, the mean squared radial speed of the person's points per frame, also from `frame_features` ([category1.md](category1.md)).
+- **Used by Category 1** (2026-10-29): the total activity energy is `e_move`: the mean squared radial speed of the person's points plus their horizontal speed squared, per frame, also from `frame_features` ([category1.md](category1.md)).
 - **Used by Category 3** (2026-10-26): the person's top-of-body height and position per frame (`frame_features`, cached in `angle_features.npz`) give the posture per epoch, also while still, and the transitions ([category3.md](category3.md)). Still to do: separating the subject from a caregiver, to stop excluding the caregiver visit.
 - **One reflector per cell.** `phase` assumes it; where two body parts share a range-Doppler cell, `beam` (or a multi-snapshot method over neighbouring Doppler bins, as the colleague's MUSIC/ESPRIT) may do better.
 - **Checked on the 6 development recordings only.** One per layout, so the orientation is confirmed for every layout; the other 150 recordings are not checked one by one.

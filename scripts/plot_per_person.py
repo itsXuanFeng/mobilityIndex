@@ -4,7 +4,7 @@ energy. Reads OUTPUT_ROOT/category1/per_person.csv and agreement.csv: run script
 
     python scripts/plot_per_person.py
 
-Writes OUTPUT_ROOT/plots/per_person/per_person_scores.png and per_person_energy_error.png
+Writes OUTPUT_ROOT/plots/per_person/per_person_scores.png, per_person_energy_error.png and per_person_energy_bias.png
 """
 import os
 import sys
@@ -17,9 +17,11 @@ import pandas as pd  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.config import OUTPUT_ROOT  # noqa: E402
+from mobility.evaluation import energy_conversion  # noqa: E402
 from mobility.plots import style  # noqa: E402
 
 SLOTS = ['#2a78d6', '#eb6834', '#1baf7a']     # categorical slots 1-3 of the reference palette: one per metric
+OVER, UNDER = '#e34948', '#2a78d6'           # diverging pair of the reference palette: radar too high / too low
 IN = os.path.join(OUTPUT_ROOT, 'category1')
 OUT = os.path.join(OUTPUT_ROOT, 'plots', 'per_person')
 
@@ -65,4 +67,26 @@ if __name__ == '__main__':
     ax.set_ylabel('error, % of MoCap energy')
     ax.set_title('Total activity energy: error per person')
     fig.savefig(os.path.join(OUT, 'per_person_energy_error.png'), dpi=160)
+
+    # signed error: bars per person, dots per recording (all on one side = systematic for that person)
+    mt = pd.read_csv(os.path.join(IN, 'metrics.csv'))
+    c = energy_conversion(mt[mt.metric == 'total_activity_energy'])
+    c['bias_pct'] = 100 * (c.converted - c.mocap) / c.mocap
+    pos = dict(zip(pp.person, range(len(pp))))
+    fig, ax = plt.subplots(figsize=(14, 4.2), constrained_layout=True)
+    x = axis(ax, labels)
+    b = pp.energy_bias_pct.values
+    ax.bar(x, b, 0.6, color=np.where(b >= 0, OVER, UNDER), edgecolor=style.SURFACE, linewidth=1)
+    ax.axhline(0, color=style.INK_2, lw=1)
+    jitter = (c.groupby('person').cumcount() - c.groupby('person').rec.transform('size').sub(1) / 2) * 0.08
+    ax.plot(c.person.map(pos) + jitter, c.bias_pct, 'o', ms=4, mfc=style.SURFACE, mec=style.INK, mew=1,
+            label='one recording')
+    ax.bar([np.nan], [np.nan], color=OVER, label='person: radar too high')
+    ax.bar([np.nan], [np.nan], color=UNDER, label='person: radar too low')
+    ax.legend(ncol=3, loc='lower left', bbox_to_anchor=(0, 1.0), borderaxespad=0.2)
+    lim = np.ceil(np.abs(c.bias_pct).max() / 10) * 10
+    ax.set_ylim(-lim, lim)
+    ax.set_ylabel('radar − MoCap, % of MoCap energy')
+    ax.set_title('Total activity energy: signed error per person', pad=22)
+    fig.savefig(os.path.join(OUT, 'per_person_energy_bias.png'), dpi=160)
     print(f'wrote {OUT}')

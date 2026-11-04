@@ -35,7 +35,7 @@ from mobility.session import load_session  # noqa: E402
 
 FEATURES = ['n_cells', 'p_sub', 'v_rms']
 ACTIVE_FEATURE = 'n_cells'     # decides active / inactive
-ENERGY_FEATURE = 'e_body'      # total activity energy: the person's points, from the angle pass
+ENERGY_FEATURE = 'e_move'      # total activity energy: the person's points and track, from the angle pass
 POOR_ALIGNMENT = 0.1           # flag recordings whose alignment peak stands out less than this
 
 

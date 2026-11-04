@@ -5,7 +5,7 @@ recording_figure   the whole recording: label classes, movement of both sensors,
                    distance to the radar
 episodes_figure    close-ups of typical episodes (chair, bed, floor) at frame resolution, with the label names
 
-Movement is shown as the z-score of log energy (radar: mean squared radial speed of the person's points, e_body;
+Movement is shown as the z-score of log energy (radar: the person's movement energy e_move, from the point cloud;
 MoCap: whole-body mean squared joint speed). The two have different units, so each is standardised over the evaluated epochs of the recording
 and they share one axis without a second scale.
 """
@@ -182,7 +182,7 @@ def episodes_figure(session, pairs, path, episodes=EPISODES):
     spans = [(title, _episode_span(session.labels, a, b)) for title, a, b in episodes]
     spans = [(title, s) for title, s in spans if s is not None]
     win = session.masks['window']
-    zr = nan_smooth(_z(session.radar['e_body'], win), FPS // 2)
+    zr = nan_smooth(_z(session.radar['e_move'], win), FPS // 2)
     zm = nan_smooth(_z(session.mocap['ke'], win), FPS // 2)
     widths = [s[1] - s[0] for _, s in spans]
     fig, ax = plt.subplots(3, len(spans), figsize=(13, 5.6), sharey='row', squeeze=False,
