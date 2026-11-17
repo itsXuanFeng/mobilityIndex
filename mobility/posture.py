@@ -27,12 +27,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .config import EPOCH_S, GROUNDTRUTH_DIR, LABEL_MARGIN_S, OUTPUT_ROOT
+from .config import EPOCH_S, FPS, GROUNDTRUTH_DIR, LABEL_MARGIN_S, RADAR_XYZ, category_dir
 from .groundtruth import mocap_50hz
 from .io.mocap import MOCAP_FPS
 from .io.recordings import labels as load_labels
 from .labels import caregiver_period, script_period
-from .utils import best_threshold
+from .utils import best_threshold, read_calibration
 
 STANDING, SITTING, LYING, FLOOR = 0, 1, 2, 3
 UNKNOWN = -1
@@ -143,10 +143,9 @@ def calibrate_thresholds(epochs, exclude_person=None):
 
 
 def posture_rules(path=POSTURE_RULE_FILE):
-    """{person: PostureRule calibrated without that person, 'ALL': on every person}, from scripts/calibrate_posture.py"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run scripts/calibrate_posture.py first')
-    d = pd.read_csv(path)
+    """{person: PostureRule calibrated without that person, 'ALL': on every person}, from
+    scripts/calibrate_posture.py"""
+    d = read_calibration(path, 'scripts/calibrate_posture.py')
     return {r.person: PostureRule(r.hip_stand, r.low_floor, r.trunk_lie, r.min_hold_s) for r in d.itertuples()}
 
 
@@ -154,7 +153,7 @@ def posture_rules(path=POSTURE_RULE_FILE):
 
 HEIGHT_SMOOTH_S = 1.0                 # running median of the radar height over this long
 GRID_OFFAXIS_K = (0.0, 0.05, 0.1, 0.15, 0.2)   # m of height per m from the radar axis (RadarPostureRule.offaxis_k)
-RADAR_POSTURE_RULE_FILE = os.path.join(OUTPUT_ROOT, 'category3', 'radar_posture_rule.csv')   # evaluate_category3
+RADAR_POSTURE_RULE_FILE = os.path.join(category_dir(3), 'radar_posture_rule.csv')   # evaluate_category3
 
 
 @dataclass(frozen=True)
@@ -167,7 +166,7 @@ class RadarPostureRule:
     Where the radar doesn't see the person, the last posture carries forward (a still, unseen person hasn't moved).
     A posture counts once it has lasted min_hold_s, as for MoCap. Thresholds: balanced accuracy per epoch against the
     MoCap posture; offaxis_k and min_hold_s: transition F1 against MoCap; all leaving the evaluated person out
-    (evaluate_category3.py)."""
+    (mobility.evaluation.calibrate_height_rule, scripts/evaluate_category3.py)."""
     h_stand: float
     h_sit: float
     h_floor: float
@@ -193,7 +192,6 @@ class RadarPostureRule:
 
 
 def _running_median(x, fps=None):
-    from .config import FPS
     n = int(round(HEIGHT_SMOOTH_S * (fps or FPS)))
     return pd.Series(x).rolling(n, center=True, min_periods=n // 2).median().values
 
@@ -207,7 +205,6 @@ def radar_height(session):
 def radar_offaxis(session):
     """the radar's horizontal distance of the person from the point below the radar, per frame, smoothed as the
     height"""
-    from .config import RADAR_XYZ
     return _running_median(np.hypot(session.radar['x_person'] - RADAR_XYZ[0],
                                     session.radar['z_person'] - RADAR_XYZ[2]))
 
@@ -233,8 +230,6 @@ def calibrate_radar_thresholds(epochs, exclude_person=None):
 
 def radar_posture_rules(path=RADAR_POSTURE_RULE_FILE):
     """{person: RadarPostureRule calibrated without that person, 'ALL': on every person}"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run scripts/evaluate_category3.py first')
-    d = pd.read_csv(path)
+    d = read_calibration(path, 'scripts/evaluate_category3.py')
     return {r.person: RadarPostureRule(r.h_stand, r.h_sit, r.h_floor, r.min_hold_s, r.offaxis_k)
             for r in d.itertuples()}

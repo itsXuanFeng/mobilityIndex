@@ -23,6 +23,11 @@ AGREE_ACTIVE, AGREE_INACTIVE = ACTIVE, INACTIVE
 ONLY_MOCAP = MOCAP         # radar missed movement MoCap saw
 ONLY_RADAR = RADAR         # radar saw movement MoCap didn't
 
+# per-person and summary figures (not about "which sensor")
+SLOTS = ['#2a78d6', '#eb6834', '#1baf7a']     # categorical slots 1-3 of the reference palette: one per metric
+OVER, UNDER = '#e34948', '#2a78d6'           # diverging pair of the reference palette: radar too high / too low
+BLUES = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b']   # sequential, steps 100-700
+
 
 def apply():
     mpl.rcParams.update({

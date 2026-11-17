@@ -1,12 +1,9 @@
 """
 One recording, ready for metrics: per radar frame, the radar features, the aligned MoCap signals, the labels and the
-masks of the evaluation window. Built from the cube (mobility.radar.cube), cached in OUTPUT_ROOT/<person>/<scenario>/:
-    features.npz          radar features (missing ones are added when new features are registered)
-    angle_features.npz    the person's height and position per frame, from the angle pass (when points.npz exists)
-Features and alignment are recomputed when the cube is newer than them.
-    subject.json          MoCap shot and subject track         (mobility.groundtruth)
-    mocap_50hz.npz        MoCap signals of the subject's track (mobility.groundtruth)
-    alignment.json        time offset of radar frame 0
+masks of the evaluation window. Built from the cube (mobility.radar.cube); cached in OUTPUT_ROOT/<person>/<scenario>/:
+    features.npz, angle_features.npz    radar features (mobility.radar.cache)
+    subject.json, mocap_50hz.npz        MoCap shot, subject track and its signals (mobility.groundtruth)
+    alignment.json                      time offset of radar frame 0; recomputed when the cube is newer
 
 Evaluation window ('window' mask): MoCap present, subject within radar coverage, inside the scripted period (no
 operator setting up or clearing the room), and outside the caregiver visit.
@@ -19,13 +16,13 @@ import numpy as np
 import pandas as pd
 
 from .align import fine_offset
-from .config import COVERAGE_RADIUS, FPS, ROOM_MAX_X, recording_dir
+from .config import COVERAGE_RADIUS, EPOCH_FRAMES, FPS, ROOM_MAX_X, recording_dir
 from .groundtruth import mocap_50hz, subject, to_frames
 from .io.recordings import capture_times, labels
 from .labels import caregiver_period, script_period
-from .radar.angle import ANGLE_FEATURES, frame_features
-from .radar.cube import cube_path, load_cube
-from .radar.features import FEATURES, compute_features
+from .radar.cache import angle_features, radar_features
+from .radar.cube import newer_than_cube
+from .utils import epoch_mean
 
 
 @dataclass
@@ -50,52 +47,18 @@ class Session:
             lab[(self.t >= r.start) & (self.t <= r.end)] = r.label
         return lab
 
+    def label_per_epoch(self, n=EPOCH_FRAMES):
+        """the scripted activity at the middle of each epoch of n frames ('' between labels)"""
+        return self.label_per_frame()[n // 2::n]
 
-def _fresh(path, person, scenario):
-    """the cached file exists and is newer than the cube it was computed from"""
-    return os.path.exists(path) and os.path.getmtime(path) > os.path.getmtime(cube_path(person, scenario))
-
-
-def _features(person, scenario, overwrite):
-    path = os.path.join(recording_dir(person, scenario), 'features.npz')
-    have = {}
-    if _fresh(path, person, scenario) and not overwrite:
-        have = dict(np.load(path))
-    missing = [n for n in FEATURES if n not in have]
-    if missing:
-        new, floor = compute_features(load_cube(person, scenario), missing, floor_db=have.get('_floor_db'))
-        have.update(new)
-        have['_floor_db'] = floor
-        np.savez(path, **have)
-    return {k: have[k] for k in FEATURES}             # caches may still hold features that were removed
-
-
-def _angle_features(person, scenario, n_frames, overwrite):
-    """per-frame features of the person from the angle-pass points (mobility.radar.angle.frame_features), cached in
-    angle_features.npz; {} when the recording has no points.npz (scripts/angle_pass.py)"""
-    from .radar.points import load_points, points_path
-    src = points_path(person, scenario)
-    if not os.path.exists(src):
-        return {}
-    path = os.path.join(recording_dir(person, scenario), 'angle_features.npz')
-    if os.path.exists(path) and os.path.getmtime(path) > os.path.getmtime(src) and not overwrite:
-        have = dict(np.load(path))
-        if set(ANGLE_FEATURES) <= set(have) and all(len(v) == n_frames for v in have.values()):
-            return have
-    have = frame_features(load_points(person, scenario), noise_floor(person, scenario), n_frames)
-    np.savez(path, **have)
-    return have
-
-
-def noise_floor(person, scenario):
-    """(range, Doppler) noise floor of the recording in dB, the one its features use (computed from the cube)"""
-    _features(person, scenario, False)
-    return np.load(os.path.join(recording_dir(person, scenario), 'features.npz'))['_floor_db']
+    def epoch_mask(self, name, n=EPOCH_FRAMES):
+        """(E,) bool per epoch of n frames: at least half of its frames are in the mask `name`"""
+        return epoch_mean(self.masks[name], n) >= 0.5
 
 
 def _alignment(person, scenario, overwrite):
     path = os.path.join(recording_dir(person, scenario), 'alignment.json')
-    if _fresh(path, person, scenario) and not overwrite:
+    if newer_than_cube(path, person, scenario) and not overwrite:
         with open(path) as fp:
             al = json.load(fp)
         if 'shot' not in al:          # older caches also held the MoCap shot and track
@@ -103,7 +66,7 @@ def _alignment(person, scenario, overwrite):
     al = dict(capture_start=capture_times(person, scenario)[0], offset_s=0.0)
     sig = mocap_50hz(person, scenario, overwrite)
     if sig is not None:
-        fit = fine_offset(_features(person, scenario, False)['p_sub'], al['capture_start'], sig)
+        fit = fine_offset(radar_features(person, scenario, False)['p_sub'], al['capture_start'], sig)
         al.update({k: v for k, v in fit.items() if k != 'curve'})
     with open(path, 'w') as fp:
         json.dump(al, fp, indent=1)
@@ -113,9 +76,9 @@ def _alignment(person, scenario, overwrite):
 def load_session(person, scenario, overwrite=False):
     al = _alignment(person, scenario, overwrite)
     al.update(subject(person, scenario))
-    radar = _features(person, scenario, overwrite)
+    radar = radar_features(person, scenario, overwrite)
     T = len(next(iter(radar.values())))
-    radar.update(_angle_features(person, scenario, T, overwrite))
+    radar.update(angle_features(person, scenario, T, overwrite))
     t = al['capture_start'] + al['offset_s'] + np.arange(T) / FPS
     lb = labels(person, scenario)
     sig = mocap_50hz(person, scenario)

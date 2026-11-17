@@ -16,7 +16,7 @@ from mobility.align import FIT_JOINTS, fit_radar_position  # noqa: E402
 from mobility.config import RADAR_XYZ  # noqa: E402
 from mobility.groundtruth import joint_kinematics  # noqa: E402
 from mobility.io.mocap import load_track  # noqa: E402
-from mobility.io.recordings import find_recordings, parse_recording  # noqa: E402
+from mobility.cli import recordings  # noqa: E402
 from mobility.radar.cube import cube_path  # noqa: E402
 from mobility.session import load_session  # noqa: E402
 
@@ -25,9 +25,8 @@ if __name__ == '__main__':
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     ap.add_argument('--min-joint-speed', type=float, default=0.3, help='m/s, fastest joint, to use a frame')
     args = ap.parse_args()
-    recs = [parse_recording(r) for r in args.only] if args.only else find_recordings()
     ranges, joints = [], []
-    for p, s in recs:
+    for p, s in recordings(args.only):
         if not os.path.exists(cube_path(p, s)):
             continue
         ses = load_session(p, s)

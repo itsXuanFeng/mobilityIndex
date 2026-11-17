@@ -7,8 +7,9 @@ from . import metric
 @metric('total_activity_energy', category=1, unit='energy x s (source units)')
 def total_activity_energy(s):
     """movement energy integrated over the valid epochs. Radar: mean squared radial speed of the person's points plus
-    their horizontal speed squared (e_move, angle pass); MoCap: mean squared joint speed. Different units: compared across recordings, after a
-    conversion factor fitted leaving the person out (mobility.evaluation.energy_conversion)."""
+    their horizontal speed squared (e_move, angle pass); MoCap: mean squared joint speed. Different units: compared
+    across recordings, after a conversion factor fitted leaving the person out
+    (mobility.evaluation.energy_conversion)."""
     return float(np.nansum(s.energy[s.valid]) * s.epoch_s)
 
 

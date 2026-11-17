@@ -5,7 +5,7 @@ All four metrics come from the activity level of mobility.states.States, so rada
 (mobility.bouts): hysteresis on the level, from the Category 1 active threshold down to the exit threshold in
 States.extra['exit_threshold']; confirmation, keeping the runs that exceed States.extra['confirm_threshold']; then the
 bout rule in States.extra['bout_rule'] (gap filling, minimum bout). All are calibrated without the evaluated person;
-mobility.evaluation.metric_table sets them.
+mobility.evaluation.metric_table sets them (set_bout_levels).
 
 The fragmentation index is the active -> inactive transition probability after the hysteresis and the confirmation,
 *before* the bout rule.
@@ -13,8 +13,16 @@ On the bouts themselves it would be exactly 1 / mean bout duration, so it would 
 """
 import numpy as np
 
-from ..bouts import hysteresis, in_bouts, runs, transition_probability
+from ..bouts import hysteresis, in_bouts, transition_probability
+from ..utils import runs
 from . import metric
+
+
+def set_bout_levels(rs, ms, radar, mocap):
+    """the Category 2 level thresholds of each sensor (radar and MoCap States): radar and mocap are (exit,
+    confirmation) thresholds"""
+    rs.extra['exit_threshold'], rs.extra['confirm_threshold'] = radar
+    ms.extra['exit_threshold'], ms.extra['confirm_threshold'] = mocap
 
 
 def _need(s, key):

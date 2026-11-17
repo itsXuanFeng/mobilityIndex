@@ -23,18 +23,17 @@ Writes to OUTPUT_ROOT/category2/:
 import argparse
 import os
 import sys
-import traceback
-from multiprocessing import Pool
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
 from mobility.bouts import bout_rules, mocap_level_factors  # noqa: E402
-from mobility.config import EPOCH_S, FPS, OUTPUT_ROOT  # noqa: E402
+from mobility.cli import error_summary, parallel_map, wide_tables  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, EPOCH_S, category_dir  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
 from mobility.session import load_session  # noqa: E402
+from mobility.utils import fold_of, person_of, spread  # noqa: E402
 
 
 def prepare(th):
@@ -43,44 +42,9 @@ def prepare(th):
         s = load_session(*parse_recording(th.rec))
         rs, ms = ev.paired_states(s, th.radar_threshold, th.mocap_threshold, active_feature=th.active_feature,
                                   energy_feature=th.energy_feature)
-        n = int(round(EPOCH_S * FPS))
-        return th.rec, th.person, rs, ms, s.label_per_frame()[n // 2::n][:len(rs.t)], None
+        return th.rec, th.person, rs, ms, s.label_per_epoch()[:len(rs.t)], None
     except Exception:
-        return th.rec, th.person, None, None, None, f'{th.rec}: {traceback.format_exc().strip().splitlines()[-1]}'
-
-
-def evaluate(rec, rs, ms, labels, rule, levels):
-    """bouts, scores and metrics of one recording with the given bout rule and levels: ((radar exit, radar
-    confirmation), (MoCap exit, MoCap confirmation)) thresholds"""
-    rs.extra['bout_rule'] = ms.extra['bout_rule'] = rule
-    ev.set_bout_levels(rs, ms, *levels)
-    frame = ev.bout_frame(rs, ms)
-    events = ev.bout_events(frame, labels=labels).assign(rec=rec)
-    return events, dict(rec=rec, **ev.bout_scores(frame, events)), pd.DataFrame(ev.metric_rows(rec, rs, ms, 2))
-
-
-def agreement_table(mt):
-    """per metric: MAE and bias (radar - MoCap), medians, MAE relative to the mean MoCap value, and the MAE of a guess
-    without any sensor: every recording gets the median MoCap value of the other persons. The script imposes much of
-    the bout structure, so the radar is only useful where it beats this guess."""
-    agreement = ev.metric_agreement(mt)
-    person = mt.rec.str.split('/').str[0]
-    for k, g in mt.groupby('metric', sort=False):
-        i = agreement.metric == k
-        p = person[g.index]
-        base = np.array([g.mocap[p != q].median() for q in p])
-        agreement.loc[i, 'mocap_median'] = g.mocap.median()
-        agreement.loc[i, 'radar_median'] = g.radar.median()
-        agreement.loc[i, 'rel_mae'] = (g.radar - g.mocap).abs().mean() / g.mocap.abs().mean()
-        agreement.loc[i, 'baseline_mae'] = np.nanmean(np.abs(base - g.mocap.values))
-    agreement['vs_baseline'] = agreement.mean_abs_err / agreement.baseline_mae
-    return agreement
-
-
-def spread(x, fmt='.3f'):
-    """median [10th-90th percentile]"""
-    q = np.nanpercentile(x, [50, 10, 90])
-    return f'{q[0]:{fmt}} [{q[1]:{fmt}}-{q[2]:{fmt}}]'
+        return th.rec, th.person, None, None, None, f'{th.rec}: {error_summary()}'
 
 
 if __name__ == '__main__':
@@ -88,20 +52,15 @@ if __name__ == '__main__':
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     ap.add_argument('--workers', type=int, default=1, help='recordings prepared in parallel')
     args = ap.parse_args()
-    th = pd.read_csv(os.path.join(OUTPUT_ROOT, 'category1', 'thresholds.csv'))   # recordings evaluated in Category 1
+    th = pd.read_csv(CATEGORY1_THRESHOLDS)   # recordings evaluated in Category 1
     if args.only:
         th = th[th.rec.isin(args.only)]
     rows = [r for _, r in th.iterrows()]
-    out = os.path.join(OUTPUT_ROOT, 'category2')
+    out = category_dir(2)
     os.makedirs(out, exist_ok=True)
-    pd.set_option('display.width', 200)
-    pd.set_option('display.max_columns', 20)
+    wide_tables(max_columns=20)
 
-    if args.workers > 1:
-        with Pool(args.workers) as pool:
-            res = pool.map(prepare, rows)
-    else:
-        res = [prepare(r) for r in rows]
+    res = parallel_map(prepare, rows, args.workers)
     failed = [r[-1] for r in res if r[-1]]
     if failed:
         print(f'{len(failed)} recordings FAILED and are left out:\n  ' + '\n  '.join(failed))
@@ -111,8 +70,8 @@ if __name__ == '__main__':
 
     # definitions, all calibrated without the evaluated person
     rules, factors = bout_rules(), mocap_level_factors()
-    rule_of = {p: rules.get(p, rules['ALL']) for p in th.person.unique()}
-    factor_of = {p: factors.get(p, factors['ALL']) for p in th.person.unique()}
+    rule_of = {p: fold_of(rules, p) for p in th.person.unique()}
+    factor_of = {p: fold_of(factors, p) for p in th.person.unique()}
     radar_thr = th.groupby('person').radar_threshold.first().to_dict()
     mocap_thr = th.groupby('person').mocap_threshold.first().to_dict()
     states = [(p, rs, ms) for _, p, rs, ms, _, _ in res]
@@ -139,7 +98,8 @@ if __name__ == '__main__':
           .to_dict())
 
     # evaluation with the calibrated definition
-    ev_rows = [evaluate(rec, rs, ms, lab, rule_of[p], levels(rec, p, *radar_of[p])) for rec, p, rs, ms, lab, _ in res]
+    ev_rows = [ev.evaluate_bouts(rec, rs, ms, lab, rule_of[p], levels(rec, p, *radar_of[p]))
+               for rec, p, rs, ms, lab, _ in res]
     events = pd.concat([r[0] for r in ev_rows], ignore_index=True)
     events.to_csv(f'{out}/bouts.csv', index=False)
     scores = pd.DataFrame([r[1] for r in ev_rows])
@@ -168,11 +128,11 @@ if __name__ == '__main__':
 
     mt = pd.concat([r[2] for r in ev_rows], ignore_index=True)
     mt.to_csv(f'{out}/metrics.csv', index=False)
-    agreement = agreement_table(mt)
+    agreement = ev.agreement_with_baseline(mt, ratio=True)
     agreement.to_csv(f'{out}/agreement.csv', index=False)
     print(f'\nper-recording metrics:\n{agreement.round(4).to_string(index=False)}')
     for k, g in mt.groupby('metric', sort=False):
-        per_person = (g.radar - g.mocap).groupby(g.rec.str.split('/').str[0]).mean()
+        per_person = (g.radar - g.mocap).groupby(person_of(g.rec)).mean()
         print(f'  {k:20s} MoCap {spread(g.mocap)}  radar {spread(g.radar)}  mean error per person '
               f'{per_person.min():+.3f} ({per_person.idxmin()}) to {per_person.max():+.3f} ({per_person.idxmax()})')
 
@@ -187,9 +147,9 @@ if __name__ == '__main__':
         (th.radar_threshold[rec],) * 2, (th.mocap_threshold[rec],) * 2)
     sens = []
     for name, ex in variants.items():
-        vr = [evaluate(rec, rs, ms, lab, rule_of[p], ex(rec, p)) for rec, p, rs, ms, lab, _ in res]
+        vr = [ev.evaluate_bouts(rec, rs, ms, lab, rule_of[p], ex(rec, p)) for rec, p, rs, ms, lab, _ in res]
         sc = pd.DataFrame([r[1] for r in vr])
-        sens.append(agreement_table(pd.concat([r[2] for r in vr], ignore_index=True)).assign(
+        sens.append(ev.agreement_with_baseline(pd.concat([r[2] for r in vr], ignore_index=True), ratio=True).assign(
             variant=name, bout_f1=sc.bout_f1.median(), f1_bout_epochs=sc.f1_bout_epochs.median()))
     sens = pd.concat(sens, ignore_index=True)
     sens.to_csv(f'{out}/sensitivity.csv', index=False)

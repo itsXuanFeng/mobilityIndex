@@ -21,10 +21,11 @@ from .config import EPOCH_S, GROUNDTRUTH_DIR, RADAR_XYZ, recording_dir
 from .io.mocap import JOINTS, MOCAP_FPS, load_track, shot_for, subject_track
 from .io.recordings import labels as load_labels
 from .labels import ACTIVE, INACTIVE, time_classes
-from .utils import best_threshold
+from .utils import best_threshold, read_calibration
 
 THRESHOLD_FILE = os.path.join(GROUNDTRUTH_DIR, 'mocap_active_threshold.csv')
-SIGNALS = ('ke', 'vr2', 'vr_cog', 'vr_max', 'dist_cog', 'cog_x', 'cog_z', 'head_y', 'hip_y', 'knee_y', 'trunk_deg', 'knee_deg')
+SIGNALS = ('ke', 'vr2', 'vr_cog', 'vr_max', 'dist_cog', 'cog_x', 'cog_z', 'head_y', 'hip_y', 'knee_y', 'trunk_deg',
+           'knee_deg')
 
 
 def joint_kinematics(t, pos):
@@ -148,7 +149,5 @@ def calibrate_active_speed(epochs, exclude_person=None):
 def active_speed_thresholds(path=THRESHOLD_FILE):
     """{person: threshold calibrated without that person, 'ALL': on every person}, from
     scripts/calibrate_mocap_threshold.py"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run scripts/calibrate_mocap_threshold.py first')
-    d = pd.read_csv(path)
+    d = read_calibration(path, 'scripts/calibrate_mocap_threshold.py')
     return dict(zip(d.person, d.threshold))

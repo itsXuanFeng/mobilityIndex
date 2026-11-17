@@ -23,13 +23,16 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.align import FIT_JOINTS, fit_radar_orientation  # noqa: E402
-from mobility.config import OUTPUT_ROOT, RADAR_XYZ  # noqa: E402
+from mobility.config import RADAR_XYZ  # noqa: E402
 from mobility.groundtruth import joint_kinematics  # noqa: E402
 from mobility.io.mocap import load_track  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
+from mobility.config import PLOTS_DIR  # noqa: E402
+from mobility.plots.angle import angle_figure  # noqa: E402
 from mobility.radar.angle import nearest_reflector, to_room  # noqa: E402
+from mobility.radar.cache import recording_noise_floor  # noqa: E402
 from mobility.radar.points import load_points, points_path  # noqa: E402
-from mobility.session import load_session, noise_floor  # noqa: E402
+from mobility.session import load_session  # noqa: E402
 
 METHODS = ('phase', 'beam')
 
@@ -38,7 +41,7 @@ def frames(rec, max_range_diff, min_joint_speed):
     """per usable frame: radar nearest reflector (both estimators) and the matching MoCap joint"""
     ses = load_session(*rec)
     pts = load_points(*rec)
-    floor = noise_floor(*rec)
+    floor = recording_noise_floor(*rec)
     t, pos = load_track(ses.alignment['track'], FIT_JOINTS)
     grid, pj, v = joint_kinematics(t, pos)
     out = None
@@ -67,26 +70,6 @@ def errors(df, method, yaw, mirror):
     return pd.DataFrame(dict(horizontal=np.hypot(x - jx, z - jz), height_angle=y - jy,
                              height_range=(RADAR_XYZ[1] - df.r.values) - jy, offaxis=np.hypot(df.jx, df.jz),
                              x=x, y=y, z=z, jx=jx, jy=jy, jz=jz))
-
-
-def figure(df, err, path, title):
-    import matplotlib.pyplot as plt
-    from mobility.plots import style
-    style.apply()
-    fig, ax = plt.subplots(3, 1, figsize=(12, 6.5), sharex=True)
-    t = df.t.values / 60
-    for a, (k, label) in zip(ax, (('x', 'x (m)'), ('z', 'z (m)'), ('y', 'height (m)'))):
-        a.plot(t, err[f'j{k}'], '.', color=style.MOCAP, markersize=2, label='MoCap: joint nearest the radar')
-        a.plot(t, err[k], '.', color=style.RADAR, markersize=2, label='radar: nearest moving reflector, angle')
-        a.set_ylabel(label)
-    ax[2].plot(t, RADAR_XYZ[1] - df.r.values, '.', color=style.INK_2, markersize=1.5,
-               label='radar: radar height - range (no angle)')
-    ax[2].legend(loc='lower left', ncol=3)
-    ax[2].set_xlabel('minutes since radar start')
-    fig.suptitle(title, x=0.06, ha='left', fontsize=12, fontweight='bold')
-    fig.tight_layout()
-    fig.savefig(path, dpi=110)
-    plt.close(fig)
 
 
 if __name__ == '__main__':
@@ -119,11 +102,11 @@ if __name__ == '__main__':
                                            horizontal_cm=('horizontal', lambda x: 100 * x.median()))
         print(f'per recording:\n{per.round(0).to_string()}')
     best = 'phase'                       # the default of mobility.radar.angle.localise
-    out = os.path.join(OUTPUT_ROOT, 'plots', 'angle')
+    out = os.path.join(PLOTS_DIR, 'angle')
     os.makedirs(out, exist_ok=True)
     e = errors(df, best, fits[best]['yaw_deg'], fits[best]['mirror'])
     for rec, g in df.groupby('rec'):
         path = os.path.join(out, rec.replace('/', '_') + '_angle.png')
-        figure(g, e.loc[g.index], path, f'{rec}: angle check, {best}, yaw {fits[best]["yaw_deg"]} deg, '
-                                        f'mirror {fits[best]["mirror"]}')
+        angle_figure(g, e.loc[g.index], path, f'{rec}: angle check, {best}, yaw {fits[best]["yaw_deg"]} deg, '
+                                              f'mirror {fits[best]["mirror"]}')
         print(path)

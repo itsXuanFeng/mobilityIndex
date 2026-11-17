@@ -14,7 +14,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mobility.config import OUTPUT_ROOT  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, PLOTS_DIR  # noqa: E402
 from mobility.evaluation import epoch_pairs  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
 from mobility.plots.agreement import episodes_figure, recording_figure  # noqa: E402
@@ -24,9 +24,9 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     args = ap.parse_args()
-    th = pd.read_csv(os.path.join(OUTPUT_ROOT, 'category1', 'thresholds.csv')).set_index('rec')
+    th = pd.read_csv(CATEGORY1_THRESHOLDS).set_index('rec')
     recs = [parse_recording(r) for r in args.only] if args.only else [parse_recording(r) for r in th.index]
-    out = os.path.join(OUTPUT_ROOT, 'plots', 'agreement')
+    out = os.path.join(PLOTS_DIR, 'agreement')
     os.makedirs(out, exist_ok=True)
     for person, scenario in recs:
         r = th.loc[f'{person}/{scenario}']

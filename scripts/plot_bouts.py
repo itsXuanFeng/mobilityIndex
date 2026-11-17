@@ -15,7 +15,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.bouts import BoutRule  # noqa: E402
-from mobility.config import EPOCH_S, OUTPUT_ROOT  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, EPOCH_S, PLOTS_DIR, category_dir  # noqa: E402
 from mobility.evaluation import bout_frame, paired_states, set_bout_levels  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
 from mobility.plots.bouts import bouts_figure  # noqa: E402
@@ -25,10 +25,10 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     args = ap.parse_args()
-    th = pd.read_csv(os.path.join(OUTPUT_ROOT, 'category1', 'thresholds.csv')).set_index('rec')
-    rules = pd.read_csv(os.path.join(OUTPUT_ROOT, 'category2', 'rules.csv')).set_index('rec')
+    th = pd.read_csv(CATEGORY1_THRESHOLDS).set_index('rec')
+    rules = pd.read_csv(os.path.join(category_dir(2), 'rules.csv')).set_index('rec')
     recs = args.only or list(rules.index)
-    out = os.path.join(OUTPUT_ROOT, 'plots', 'bouts')
+    out = os.path.join(PLOTS_DIR, 'bouts')
     os.makedirs(out, exist_ok=True)
     for rec in recs:
         r, b = th.loc[rec], rules.loc[rec]

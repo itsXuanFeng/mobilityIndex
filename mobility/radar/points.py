@@ -18,23 +18,22 @@ Output in OUTPUT_ROOT/<person>/<scenario>/:
     points_info.json    selection, counts, frames skipped, timing
 
 Kept cells: range >= MIN_RANGE, any Doppler bin but zero velocity, more than POINT_DB above the cell's noise floor.
-The floor is the recording's own (mobility.session.noise_floor, from the cube), so the cube and its features must exist
-first. Slow bins are kept on purpose: breathing and small movements (~0.04 m/s) may locate a person who keeps still.
+The floor is the recording's own (mobility.radar.cache.recording_noise_floor, from the cube), so the cube and its
+features must exist first. Slow bins are kept on purpose: breathing and small movements (~0.04 m/s) may locate a
+person who keeps still.
 Frames without data or damaged by lost packets (NaN in the cube) are skipped, as in the cube.
 """
 import json
 import os
-import queue
-import threading
 import time
 
 import numpy as np
 import torch
 
 from ..config import ABOVE_FLOOR_DB, MIN_RANGE, N_DOPPLER, RANGE_AXIS, recording_dir
-from ..io.raw import frame_bytes, frames_on_disk, recording_files
-from ..session import noise_floor
-from .cube import _batches, zero_filled
+from ..io.raw import BatchReader, frame_bytes, frames_on_disk, recording_files
+from .cache import recording_noise_floor
+from .cube import zero_filled
 from .dsp import RangeDoppler
 
 POINT_DB = ABOVE_FLOOR_DB      # dB above the floor to keep a cell (6): later steps can raise it with `db`
@@ -74,24 +73,17 @@ def write_points(person, scenario, overwrite=False, device=None):
         return
     device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     rd = RangeDoppler(device)
-    floor = torch.as_tensor(noise_floor(person, scenario), dtype=torch.float32, device=device)
+    floor = torch.as_tensor(recording_noise_floor(person, scenario), dtype=torch.float32, device=device)
     keep = torch.as_tensor(KEEP, device=device)
     paths, offsets = recording_files(person, scenario)
     T = frames_on_disk(paths, offsets, frame_bytes())
     parts = {k: [] for k in ('frame', 'rbin', 'dbin', 'db', 'iq')}
     n_read, skipped = 0, []
-    q = queue.Queue(maxsize=8)
-    threading.Thread(target=_batches, args=(paths, offsets, q), daemon=True).start()
-    t_wait = t_compute = 0.0
+    batches = BatchReader(paths, offsets)
+    t_compute = 0.0
     t_start = time.time()
-    while True:
+    for i0, frames in batches:
         t = time.time()
-        item = q.get()
-        t_wait += time.time() - t
-        if item is None:
-            break
-        t = time.time()
-        i0, frames = item
         x = torch.as_tensor(frames, device=device)
         spec = rd.spectrum(x)
         bad = (spec.flatten(1).abs().amax(1) == 0) | zero_filled(x)    # no data, or damaged by lost packets
@@ -107,6 +99,7 @@ def write_points(person, scenario, overwrite=False, device=None):
         skipped += (i0 + torch.nonzero(bad).flatten().cpu().numpy()).tolist()
         n_read += len(frames)
         t_compute += time.time() - t
+    t_wait = batches.wait_s
     arrays = {k: np.concatenate(v) if v else np.empty((0,) if k != 'iq' else (0, 12, 2)) for k, v in parts.items()}
     order = np.argsort(arrays['frame'], kind='stable')            # batches arrive in order; keep it guaranteed
     arrays = {k: v[order] for k, v in arrays.items()}

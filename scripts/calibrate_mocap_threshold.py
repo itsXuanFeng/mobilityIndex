@@ -17,16 +17,16 @@ import argparse
 import os
 import sys
 import traceback
-from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, roc_auc_score
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mobility.config import EPOCH_S, GROUNDTRUTH_DIR, LABEL_ROOT  # noqa: E402
+from mobility.cli import parallel_map, wide_tables  # noqa: E402
+from mobility.config import EPOCH_S, GROUNDTRUTH_DIR  # noqa: E402
 from mobility.groundtruth import THRESHOLD_FILE, calibrate_active_speed, mocap_epochs  # noqa: E402
-from mobility.io.recordings import find_recordings, labels, natural_key  # noqa: E402
+from mobility.io.recordings import find_recordings, has_labels, labels, natural_key  # noqa: E402
 from mobility.labels import ACTIVE, INACTIVE, label_class  # noqa: E402
 
 
@@ -43,10 +43,9 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workers', type=int, default=8)
     args = ap.parse_args()
-    recs = [r for r in find_recordings() if os.path.exists(os.path.join(LABEL_ROOT, *r, 'timestamps.csv'))]
+    recs = [r for r in find_recordings() if has_labels(*r)]
     print(f'{len(recs)} recordings with labels', flush=True)
-    with Pool(args.workers) as pool:
-        parts = pool.map(epochs_of, recs)
+    parts = parallel_map(epochs_of, recs, args.workers)
     ep = pd.concat([p for p in parts if p is not None], ignore_index=True)
     print(f'{ep.groupby(["person", "scenario"]).ngroups} recordings with MoCap, {len(ep)} epochs '
           f'({(ep.cls == ACTIVE).sum()} active, {(ep.cls == INACTIVE).sum()} inactive by label)')
@@ -86,5 +85,5 @@ if __name__ == '__main__':
     summary['class'] = [label_class(lab_) for lab_ in summary.index]
     summary = summary.sort_values('median_speed')
     summary.to_csv(os.path.join(GROUNDTRUTH_DIR, 'per_label.csv'))
-    pd.set_option('display.width', 200)
+    wide_tables()
     print('\n' + summary.round(3).to_string())

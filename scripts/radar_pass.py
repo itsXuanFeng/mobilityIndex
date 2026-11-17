@@ -13,7 +13,7 @@ import sys
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mobility.io.recordings import find_recordings, parse_recording  # noqa: E402
+from mobility.cli import recordings  # noqa: E402
 from mobility.radar.cube import write_cube  # noqa: E402
 
 if __name__ == '__main__':
@@ -21,9 +21,8 @@ if __name__ == '__main__':
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     ap.add_argument('--overwrite', action='store_true')
     args = ap.parse_args()
-    recs = [parse_recording(r) for r in args.only] if args.only else find_recordings()
     failed = []
-    for person, scenario in recs:
+    for person, scenario in recordings(args.only):
         try:
             write_cube(person, scenario, args.overwrite)
         except Exception:

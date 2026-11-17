@@ -23,21 +23,19 @@ import argparse
 import os
 import sys
 import traceback
-from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mobility.config import GROUNDTRUTH_DIR, LABEL_ROOT  # noqa: E402
+from mobility.cli import parallel_map  # noqa: E402
+from mobility.config import GROUNDTRUTH_DIR  # noqa: E402
 from mobility.groundtruth import mocap_50hz  # noqa: E402
-from mobility.io.mocap import MOCAP_FPS  # noqa: E402
-from mobility.io.recordings import find_recordings, labels, natural_key  # noqa: E402
-from mobility.labels import caregiver_period, script_period  # noqa: E402
+from mobility.io.recordings import find_recordings, has_labels, labels, natural_key  # noqa: E402
 from mobility.posture import (GRID_LOW_FLOOR, GRID_MIN_HOLD_S, POSTURE_RULE_FILE, POSTURES, UNKNOWN,  # noqa: E402
                               PostureRule, calibrate_thresholds, posture_epochs)
-from mobility.transitions import match_scripted, posture_transitions, scripted_transitions  # noqa: E402
+from mobility.transitions import match_scripted, mocap_script_transitions, scripted_transitions  # noqa: E402
 
 
 def load(rec):
@@ -55,17 +53,6 @@ def load(rec):
         return None
 
 
-def events_in_script(sig, lb, rule):
-    """MoCap transitions inside the scripted period, outside the caregiver visit"""
-    ev = posture_transitions(sig['t'], rule.classify(sig), rule.min_hold_s, fps=MOCAP_FPS)
-    s0, s1 = script_period(lb)
-    keep = (ev.t >= s0) & (ev.t <= s1)
-    care = caregiver_period(lb)
-    if care:
-        keep &= ~((ev.t >= care[0]) & (ev.t <= care[1]))
-    return ev[keep].reset_index(drop=True)
-
-
 DATA = {}   # recording -> (epochs, 50 Hz signals, labels); filled before the worker pool forks
 
 
@@ -73,7 +60,7 @@ def transition_counts(rule):
     """per recording: matched scripted changes, MoCap transitions, scripted changes"""
     out = {}
     for rec, (_, sig, lb) in DATA.items():
-        ev, sc = events_in_script(sig, lb, rule), scripted_transitions(lb)
+        ev, sc = mocap_script_transitions(sig, lb, rule), scripted_transitions(lb)
         out[rec] = (len(match_scripted(sc, ev)), len(ev), len(sc))
     return out
 
@@ -87,9 +74,8 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workers', type=int, default=16)
     args = ap.parse_args()
-    recs = [r for r in find_recordings() if os.path.exists(os.path.join(LABEL_ROOT, *r, 'timestamps.csv'))]
-    with Pool(args.workers) as pool:
-        parts = pool.map(load, recs)
+    recs = [r for r in find_recordings() if has_labels(*r)]
+    parts = parallel_map(load, recs, args.workers)
     DATA.update({r: p for r, p in zip(recs, parts) if p is not None})
     ep = pd.concat([p[0] for p in DATA.values()], ignore_index=True)
     os.makedirs(GROUNDTRUTH_DIR, exist_ok=True)
@@ -104,8 +90,7 @@ if __name__ == '__main__':
     grid = {p: [PostureRule(hip, low, trunk, hold) for low in GRID_LOW_FLOOR for hold in GRID_MIN_HOLD_S]
             for p, (hip, trunk) in folds.items()}
     todo = sorted({r for rules in grid.values() for r in rules}, key=str)
-    with Pool(args.workers) as pool:
-        counts = dict(zip(todo, pool.map(transition_counts, todo)))
+    counts = dict(zip(todo, parallel_map(transition_counts, todo, args.workers)))
     print(f'{len(todo)} candidate rules', flush=True)
 
     rows, scripted_rows, extra_rows = [], [], []
@@ -124,7 +109,7 @@ if __name__ == '__main__':
             for rec, (_, sig, lb) in DATA.items():
                 if rec[0] != person:
                     continue
-                ev, sc = events_in_script(sig, lb, rule), scripted_transitions(lb)
+                ev, sc = mocap_script_transitions(sig, lb, rule), scripted_transitions(lb)
                 m = match_scripted(sc, ev)
                 scripted_rows += [dict(rec='/'.join(rec), label=s.label, kind=s.kind, found=i in m)
                                   for i, s in enumerate(sc.itertuples())]

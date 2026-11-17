@@ -163,7 +163,7 @@ Where the radar doesn't see the person, the last posture carries forward (SCOPE.
 
 The directions themselves are unbiased: the radar's horizontal direction cosine is 0.99–1.02 times MoCap's at every distance (the 16,096 frames of the orientation check), and scaling it only adds error. So it's what the radar *sees* that changes: off-axis, less of the top of the head and more of the chest, which also breathes. Sitting at the far chair (2–3 m) then reads 0.72 m, right at the sitting / lying threshold, and the posture flickers. Without the correction the transition F1 was 0.64; with a fixed *k* of 0.05, 0.10 or 0.15 m/m (exploration) 0.71, 0.76, 0.77.
 
-**Calibration, leaving the evaluated person out** (`calibrate_height_rule` in [scripts/evaluate_category3.py](../scripts/evaluate_category3.py)), with MoCap posture and transitions under that person's MoCap posture rule:
+**Calibration, leaving the evaluated person out** (`calibrate_height_rule` in [mobility/evaluation/category3.py](../mobility/evaluation/category3.py)), with MoCap posture and transitions under that person's MoCap posture rule:
 - for each *k* in 0–0.2 m/m: the three thresholds maximise the balanced accuracy of their split between neighbouring postures (standing | sitting, sitting | lying, lying | floor), per 1 s epoch where the radar sees the person;
 - then *k* and `min_hold_s` (0.5–5 s) together maximise the transition F1 against MoCap on the other persons.
 

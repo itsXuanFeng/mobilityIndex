@@ -13,12 +13,23 @@ LABEL_ROOT = f'{CAMPAIGN}/timestamps'
 
 # everything this package writes: radar cubes, cached features, evaluation tables, plots
 OUTPUT_ROOT = os.environ.get('MOBILITY_OUTPUT', os.path.join(REPO, 'output'))
-GROUNDTRUTH_DIR = os.path.join(OUTPUT_ROOT, 'groundtruth')   # MoCap active threshold calibration
+GROUNDTRUTH_DIR = os.path.join(OUTPUT_ROOT, 'groundtruth')   # MoCap calibrations against the labels and the script
+PLOTS_DIR = os.path.join(OUTPUT_ROOT, 'plots')
 
 
 def recording_dir(person, scenario):
     """per-recording outputs: cube, cached features, MoCap signals, alignment"""
     return os.path.join(OUTPUT_ROOT, person, scenario)
+
+
+def category_dir(category):
+    """evaluation tables of one category (scripts/evaluate_category<k>.py)"""
+    return os.path.join(OUTPUT_ROOT, f'category{category}')
+
+
+# per recording evaluated in Category 1: the radar and MoCap active thresholds used for it. Categories 2-3, the
+# plots and the Category 1 explorations evaluate the same recordings with these thresholds.
+CATEGORY1_THRESHOLDS = os.path.join(category_dir(1), 'thresholds.csv')
 
 # ---- radar (mobility/io/config.mmwave.json) ----
 FPS = 20                     # frames per second
@@ -47,6 +58,7 @@ COVERAGE_RADIUS = 5.0             # subject CoG farther than this from the radar
 
 # ---- epochs and ground truth ----
 EPOCH_S = 1.0
+EPOCH_FRAMES = int(round(EPOCH_S * FPS))   # radar frames per epoch
 # MoCap active / inactive: RMS joint speed above a threshold calibrated against the activity labels, leaving the
 # person out (scripts/calibrate_mocap_threshold.py, mobility/labels.py); not set by hand
 MAX_MOCAP_RMS = 3.0               # m/s: an epoch with a higher RMS joint speed is a MoCap tracking jump, not movement

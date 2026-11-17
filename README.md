@@ -32,28 +32,38 @@ Each metric is a single rule applied to *states*: per-epoch energy, activity lev
 
 ```
 mobility/                  the package
-  config.py                paths, radar constants, radar position, thresholds
-  io/                      reading the data: raw .bin frames, capture logs and labels, MoCap shots and tracks
+  config.py                paths (data, outputs), radar constants, radar position, thresholds, epochs
+  utils.py                 small helpers: NaN-aware signals, runs of a mask, thresholds, calibration tables
+  io/                      reading the data: raw .bin frames (also in background batches), capture logs and labels,
+                           MoCap shots and tracks
   radar/
     dsp.py                 range-Doppler spectrum and power of all 12 virtual channels (GPU or CPU)
     cube.py                one pass over a raw recording -> cube (channel-averaged power)
     points.py              the angle pass: second read -> per-channel complex values of the cells that hold something
-    angle.py               points -> direction cosines -> 3-D positions (virtual array, phase corrections, orientation)
-    features.py            per-frame features, @feature registry
+    angle.py               points -> direction cosines -> 3-D positions (virtual array, phase corrections, orientation);
+                           per-frame features of the person
+    features.py            per-frame features of the cube, @feature registry
+    cache.py               per-recording caches of the features (features.npz, angle_features.npz), the noise floor
   groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed, posture signals; active threshold
   labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
-  bouts.py                 bout definition (hysteresis, confirmation, gap filling, minimum bout); its calibration
+  bouts.py                 bout definition (hysteresis, confirmation, gap filling, minimum bout); its calibration;
+                           bout matching
   posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar height rule
-  transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier (comparison)
-  align.py                 time offset radar <-> MoCap, radar position fit
+  transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier and hand
+                           rule (comparisons); event matching
+  align.py                 time offset radar <-> MoCap, radar position and orientation fits
   session.py               one recording: aligned features + MoCap + labels + evaluation masks (cached)
   states.py                per-epoch States from the radar or from MoCap
   metrics/                 @metric registry; category1.py, category2.py, category3.py
-  evaluation.py            per-epoch scores, leave-one-subject-out thresholds, metric agreement, bout and transition
-                           matching
-  plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, diagnostic.py,
-                           style.py
-scripts/                   command-line entry points (below)
+  evaluation/              radar vs MoCap, everything calibrated leave-one-subject-out:
+    agreement.py           per recording: metrics of both sensors, agreement, no-sensor baseline (all categories)
+    category1.py           per epoch: AUC, F1, radar thresholds; per person, per activity, per distance
+    category2.py           bouts per epoch and per bout; radar exit and confirmation thresholds
+    category3.py           transitions per event, posture per epoch; height rule, peak quantile, comparison methods
+  plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, per_person.py,
+                           sensitivity.py, angle.py, diagnostic.py; common.py and style.py shared
+  cli.py                   helpers of the scripts: recordings to run, parallel map, printing
+scripts/                   command-line entry points (below): they read and write the tables; the logic is in mobility/
 docs/                      write-ups per category; raw data format and missing data (raw_data_january.md)
 output/                    everything generated (git-ignored; MOBILITY_OUTPUT overrides the location)
 ```
@@ -98,7 +108,7 @@ Outputs, under `output/`:
 | `<person>/<scenario>/rd12_db.npy` | cube, float16 dB, (T, 128 range, 128 Doppler), ~360 MB; NaN rows for frames missing, all-zero or damaged by lost packets |
 | `<person>/<scenario>/pass_info.json` | radar pass: missing, all-zero and damaged frames, lost packets from the capture log, timing |
 | `<person>/<scenario>/points.npz`, `points_info.json` | angle pass: per-channel complex values of the cells > 6 dB above their floor, ~170 MB |
-| `<person>/<scenario>/features.npz`, `subject.json`, `mocap_50hz.npz`, `alignment.json` | session cache |
+| `<person>/<scenario>/features.npz`, `angle_features.npz`, `subject.json`, `mocap_50hz.npz`, `alignment.json` | session cache |
 | `groundtruth/mocap_active_threshold.csv` | MoCap active threshold per left-out person (and `ALL`) |
 | `groundtruth/bout_rule.csv` | MoCap exit and confirmation factors and bout rule per left-out person (and `ALL`) |
 | `groundtruth/posture_rule.csv` | MoCap posture rule per left-out person (and `ALL`) |
@@ -131,4 +141,4 @@ It is computed for both radar and MoCap by `compute_metrics` and `evaluation.met
 
 **State a metric needs**: add a field to `States` in `mobility/states.py` and fill it in both `radar_states` and `mocap_states` (per epoch), or set it in `metric_table` (events, like `transitions`).
 
-**A category's evaluation.** Copy `scripts/evaluate_category1.py` (or `evaluate_category2.py` / `evaluate_category3.py`, which reuse the Category 1 recordings and thresholds). The building blocks are in `mobility/evaluation.py`.
+**A category's evaluation.** Copy `scripts/evaluate_category1.py` (or `evaluate_category2.py` / `evaluate_category3.py`, which reuse the Category 1 recordings and thresholds). The building blocks are in `mobility/evaluation/`, one module per category plus `agreement.py` for the per-recording metrics; all are importable from `mobility.evaluation`.

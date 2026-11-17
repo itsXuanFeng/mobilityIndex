@@ -20,8 +20,12 @@ scripts/fit_radar_orientation.py):
     x, z = radar + r (u a_room + v b_room),    y = radar height - r w
 """
 import numpy as np
+import pandas as pd
 
-from ..config import N_DOPPLER, RADAR_MIRROR, RADAR_XYZ, RADAR_YAW_DEG, RANGE_AXIS
+from ..config import (COVERAGE_RADIUS, FPS, MIN_SPEED, N_DOPPLER, RADAR_MIRROR, RADAR_XYZ, RADAR_YAW_DEG, RANGE_AXIS,
+                      ROOM_MAX_X, VELOCITY_AXIS)
+from ..utils import nan_smooth
+from .features import MOVING
 
 TX_POS = np.array([[0, 0], [2, -2], [0, -2]], float)
 RX_POS = np.array([[1, 0], [1, 1], [0, 0], [0, 1]], float)
@@ -105,7 +109,6 @@ def nearest_reflector(points, floor_db, method='phase', db_above=12, min_cells=2
     power-weighted mean direction cosines of its cells
     :return: dict of arrays frame, r, u, v, cells
     """
-    from .features import MOVING
     strong = (points['db'].astype(np.float32) > floor_db[points['rbin'], points['dbin']] + db_above) & \
         MOVING[points['rbin'], points['dbin']]
     p = {k: v[strong] for k, v in points.items()}
@@ -150,8 +153,6 @@ ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body
 def horizontal_speed(x, z, fps):
     """(T,) horizontal speed (m/s) of the person's track (x_person, z_person); 0 where the person isn't seen. The
     track jumps between body parts and jitters, so: 0.5 s running median, 1 s running mean, displacement over 1 s."""
-    import pandas as pd
-    from ..utils import nan_smooth
     half = fps // 2
     pos = np.stack([nan_smooth(pd.Series(c).rolling(half + 1, center=True, min_periods=half // 2 + 1).median().values,
                                fps) for c in (x, z)], 1)
@@ -182,8 +183,6 @@ def frame_features(points, floor_db, n_frames):
     radar. The person: within PERSON_RADIUS_M of the position. NaN (counts 0) where fewer than MIN_PERSON_POINTS.
     The caregiver and operator would also be seen: their periods are outside the evaluation window.
     """
-    import pandas as pd
-    from ..config import COVERAGE_RADIUS, FPS, MIN_SPEED, ROOM_MAX_X, VELOCITY_AXIS
     out = {k: np.full(n_frames, np.nan) for k in ANGLE_FEATURES}
     out['n_person'][:] = out['n_slow'][:] = out['e_body'][:] = out['v_horiz'][:] = out['e_move'][:] = 0
     strong = points['db'].astype(np.float32) > floor_db[points['rbin'], points['dbin']] + STRONG_DB

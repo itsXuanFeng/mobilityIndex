@@ -30,7 +30,6 @@ import argparse
 import os
 import sys
 import time
-from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
@@ -39,13 +38,12 @@ from sklearn.metrics import f1_score
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
-from mobility.config import EPOCH_S, FPS, OUTPUT_ROOT  # noqa: E402
+from mobility.cli import parallel_map, wide_tables  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, FPS, category_dir  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds  # noqa: E402
 from mobility.radar.cube import load_cube  # noqa: E402
 from mobility.radar.features import MOVING  # noqa: E402
 from mobility.session import load_session  # noqa: E402
-from mobility.states import mocap_states  # noqa: E402
-from mobility.utils import epoch_mean, log_level  # noqa: E402
 
 TAUS_S = [30, 120, 600]       # clutter-map time constant
 Q = 0.2                       # clutter map: running quantile of each cell (as the current 20th percentile)
@@ -61,7 +59,7 @@ SOURCES = ['raw', 'mean'] + [f'q{t}' for t in TAUS_S]
 # lanes: (name, source map, CFAR k in dB or None = fixed margin)
 LANES = ([(f'q{t}_so{k:g}', f'q{t}', k) for t in TAUS_S for k in K_DB] + [(f'q{t}_fixed6', f'q{t}', None) for t in TAUS_S]
          + [(f'raw_so{k:g}', 'raw', k) for k in K_DB] + [('mean120_so6', 'mean', 6)])
-TABLE = os.path.join(OUTPUT_ROOT, 'category1', 'so_cfar_prototype.csv')
+TABLE = os.path.join(category_dir(1), 'so_cfar_prototype.csv')
 
 
 def strips(Z, axis, guard, n, mode):
@@ -125,16 +123,8 @@ def epochs(rec, gt_thr):
     person, scenario = rec.split('/')
     s = load_session(person, scenario)
     counts = detections(load_cube(person, scenario))
-    n = int(round(EPOCH_S * FPS))
-    ms = mocap_states(s, active_speed=gt_thr[person], window='has_mocap')
-    E = len(ms.t)
-    df = pd.DataFrame(dict(rec=s.name, person=person, speed=ms.level, active=ms.active,
-                           window=epoch_mean(s.masks['window'], n)[:E] >= 0.5,
-                           label=s.label_per_frame()[n // 2::n][:E], t_s=np.arange(E) * EPOCH_S))
-    for (name, _, _), x in zip(LANES, counts):
-        df[name] = epoch_mean(log_level(x), n)[:E]                    # as states.feature_level for a log feature
-    df['n_cells'] = epoch_mean(log_level(s.radar['n_cells']), n)[:E]   # current detector (global floor)
-    return df[ms.valid]
+    return ev.count_epoch_table(s, {name: x for (name, _, _), x in zip(LANES, counts)}, gt_thr[person],
+                                with_label=True)     # with n_cells: the current detector (global floor)
 
 
 def _epochs(args):
@@ -158,9 +148,8 @@ if __name__ == '__main__':
         print(f'{args.only}: {len(d)} epochs in {time.time() - t0:.0f} s')
         print(d[[c for c, _, _ in LANES] + ['n_cells']].describe().round(2).to_string())
         sys.exit()
-    recs = pd.read_csv(os.path.join(OUTPUT_ROOT, 'category1', 'thresholds.csv')).rec.tolist()   # evaluated ones
-    with Pool(args.workers) as pool:
-        table = pd.concat(pool.map(_epochs, [(r, gt_thr) for r in recs]), ignore_index=True)
+    recs = pd.read_csv(CATEGORY1_THRESHOLDS).rec.tolist()   # evaluated ones
+    table = pd.concat(parallel_map(_epochs, [(r, gt_thr) for r in recs], args.workers), ignore_index=True)
     w = table[table.window]
     print(f'{table.rec.nunique()} recordings, {len(w)} epochs in the evaluation window')
     rows = []
@@ -174,5 +163,5 @@ if __name__ == '__main__':
                          f1_after_2min=pooled_f1(w, name, thr, w.t_s >= WARMUP_S)))
     res = pd.DataFrame(rows)
     res.to_csv(TABLE, index=False)
-    pd.set_option('display.width', 200)
+    wide_tables()
     print(res.round(3).to_string(index=False))

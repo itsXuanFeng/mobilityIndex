@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
 
-from ..bouts import runs
-from ..evaluation import match_bouts
+from ..bouts import match_bouts
+from ..utils import runs
 from . import style
-from .agreement import EPISODES, _episode_span, _hatch_unevaluated, _label_spans, _strip_axes
+from .common import EPISODES, episode_span, hatch_unevaluated, label_spans, strip_axes
 
 LEGEND = [
     Patch(facecolor=style.MOCAP, label='MoCap bout, matched'),
@@ -32,7 +32,7 @@ def _bout_row(ax, x, width, active, bouts, matched, colour, label):
             ax.add_patch(plt.Rectangle((x0, 0.4), w, 0.55, facecolor=colour, linewidth=0))
         else:
             ax.add_patch(plt.Rectangle((x0, 0.4), w, 0.55, facecolor=style.SURFACE, edgecolor=colour, linewidth=1.2))
-    _strip_axes(ax, label)
+    strip_axes(ax, label)
 
 
 def _rows(axes, session, pairs, t0, scale, names_until=None):
@@ -41,12 +41,12 @@ def _rows(axes, session, pairs, t0, scale, names_until=None):
     w = 1 / scale
     mb, rb = runs(pairs.mocap_bout.values), runs(pairs.radar_bout.values)
     m = match_bouts(mb, rb)
-    _label_spans(axes[0], session.labels, t0, scale, names_until)
-    _strip_axes(axes[0], 'activity\nlabel')
+    label_spans(axes[0], session.labels, t0, scale, names_until)
+    strip_axes(axes[0], 'activity\nlabel')
     for ax, act, b, matched, colour, label in (
             (axes[1], pairs.mocap_active.values & pairs.evaluated.values, mb, set(m), style.MOCAP, 'MoCap'),
             (axes[2], pairs.radar_active.values & pairs.evaluated.values, rb, set(m.values()), style.RADAR, 'radar')):
-        _hatch_unevaluated(ax, x, w, pairs.evaluated.values)
+        hatch_unevaluated(ax, x, w, pairs.evaluated.values)
         _bout_row(ax, x, w, act, b, matched, colour, label)
     for ax in axes:
         ax.set_xlim(x[0], x[-1] + w)
@@ -56,7 +56,7 @@ def _rows(axes, session, pairs, t0, scale, names_until=None):
 def bouts_figure(session, pairs, path, note='', episode=EPISODES[1]):
     """pairs from mobility.evaluation.bout_frame; note: the bout definition used, for the subtitle"""
     style.apply()
-    span = _episode_span(session.labels, episode[1], episode[2])
+    span = episode_span(session.labels, episode[1], episode[2])
     fig, ax = plt.subplots(7 if span else 3, 1, figsize=(12, 6.4 if span else 3.2),
                            gridspec_kw=dict(height_ratios=[0.35, 0.6, 0.6] + ([1.15, 0.35, 0.6, 0.6] if span else []),
                                             hspace=0.15))

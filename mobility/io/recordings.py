@@ -1,5 +1,6 @@
 """Which radar recordings exist, when they started, and their activity labels."""
 import glob
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -45,6 +46,11 @@ def lost_packets(person, scenario):
     """packets the DCA1000 lost and filled with zeros during the capture, from its log"""
     with open(f'{FMCW_ROOT}/{person}/{scenario}/test2x_1_Raw_LogFile.csv') as fp:
         return int(re.search(r'Number of zero filled packets - (\d+)', fp.read()).group(1))
+
+
+def has_labels(person, scenario):
+    """the recording has activity labels"""
+    return os.path.exists(f'{LABEL_ROOT}/{person}/{scenario}/timestamps.csv')
 
 
 def labels(person, scenario):

@@ -19,7 +19,7 @@ import traceback
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mobility.io.recordings import find_recordings, parse_recording  # noqa: E402
+from mobility.cli import recordings  # noqa: E402
 from mobility.radar.cube import cube_path  # noqa: E402
 from mobility.radar.points import write_points  # noqa: E402
 
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
     if args.threads:
         torch.set_num_threads(args.threads)
-    recs = [parse_recording(r) for r in args.only] if args.only else find_recordings()
+    recs = recordings(args.only)
     no_cube = [r for r in recs if not os.path.exists(cube_path(*r))]
     if no_cube:
         print('skipped, no cube (run scripts/radar_pass.py first):', ' '.join('/'.join(r) for r in no_cube))

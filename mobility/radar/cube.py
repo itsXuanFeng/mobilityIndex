@@ -12,8 +12,6 @@ is read only once. Reading is limited by the network (~110 MB/s on a 1 Gbit/s li
 """
 import json
 import os
-import queue
-import threading
 import time
 
 import numpy as np
@@ -21,11 +19,10 @@ import torch
 import torch.nn.functional as F
 
 from ..config import N_DOPPLER, N_RANGE, recording_dir
-from ..io.raw import frame_bytes, frames_on_disk, read_frames, recording_files
+from ..io.raw import BatchReader, frame_bytes, frames_on_disk, recording_files
 from ..io.recordings import lost_packets
 from .dsp import RangeDoppler
 
-BATCH = 64
 # A lost 1456-byte packet zero-fills 364 consecutive complex samples; real ADC data practically never has I = Q = 0
 # for this many samples in a row. Shorter zero runs (a lost packet cut by a frame boundary) barely distort the frame.
 MIN_ZERO_RUN = 16
@@ -44,26 +41,15 @@ def load_cube(person, scenario):
     return np.load(cube_path(person, scenario), mmap_mode='r')
 
 
+def newer_than_cube(path, person, scenario):
+    """the file exists and is newer than the recording's cube: a cache computed from the current cube"""
+    return os.path.exists(path) and os.path.getmtime(path) > os.path.getmtime(cube_path(person, scenario))
+
+
 def zero_filled(frames, min_run=MIN_ZERO_RUN):
     """(n,) bool: frames with at least min_run consecutive samples (stream order) exactly 0, i.e. a lost packet"""
     z = (frames == 0).reshape(len(frames), 1, -1).float()
     return F.avg_pool1d(z, min_run, stride=1).amax(-1).squeeze(1) > 1 - 1e-6
-
-
-def _batches(paths, offsets, q):
-    """reader thread: batches of consecutive frames, so reading overlaps with the GPU work"""
-    buf, idx = [], []
-    try:
-        for i, frame in read_frames(paths, offsets, frames_per_chunk=BATCH):
-            if buf and (i != idx[-1] + 1 or len(buf) == BATCH):
-                q.put((idx[0], np.stack(buf)))
-                buf, idx = [], []
-            buf.append(frame)
-            idx.append(i)
-        if buf:
-            q.put((idx[0], np.stack(buf)))
-    finally:
-        q.put(None)
 
 
 def write_cube(person, scenario, overwrite=False, device=None):
@@ -83,18 +69,11 @@ def write_cube(person, scenario, overwrite=False, device=None):
     n_read, null_frames, damaged_frames = 0, [], []
     try:
         cube[:] = np.nan
-        q = queue.Queue(maxsize=8)
-        threading.Thread(target=_batches, args=(paths, offsets, q), daemon=True).start()
-        t_wait = t_compute = 0.0
+        batches = BatchReader(paths, offsets)
+        t_compute = 0.0
         t_start = time.time()
-        while True:
+        for i0, x in batches:
             t = time.time()
-            item = q.get()
-            t_wait += time.time() - t
-            if item is None:
-                break
-            t = time.time()
-            i0, x = item
             x = torch.as_tensor(x, device=device)
             p = rd.power(x)                                          # (n, tx, rx, range, Doppler)
             null = (p.flatten(1).amax(1) == 0).cpu().numpy()         # all-zero frames: no data
@@ -106,6 +85,7 @@ def write_cube(person, scenario, overwrite=False, device=None):
             null_frames += (i0 + np.flatnonzero(null)).tolist()
             damaged_frames += (i0 + np.flatnonzero(damaged)).tolist()
             t_compute += time.time() - t
+        t_wait = batches.wait_s
         cube.flush()
         del cube
         os.replace(tmp, path)

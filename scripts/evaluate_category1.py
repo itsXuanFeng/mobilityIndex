@@ -19,19 +19,19 @@ All thresholds are calibrated leave-one-subject-out. Writes to OUTPUT_ROOT/categ
 import argparse
 import os
 import sys
-import traceback
-from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
-from mobility.config import LABEL_ROOT, OUTPUT_ROOT  # noqa: E402
+from mobility.cli import error_summary, parallel_map, recordings, wide_tables  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, category_dir  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds, subject  # noqa: E402
-from mobility.io.recordings import find_recordings, parse_recording  # noqa: E402
+from mobility.io.recordings import has_labels  # noqa: E402
 from mobility.radar.cube import cube_path  # noqa: E402
 from mobility.session import load_session  # noqa: E402
+from mobility.utils import best_threshold, spread  # noqa: E402
 
 FEATURES = ['n_cells', 'p_sub', 'v_rms']
 ACTIVE_FEATURE = 'n_cells'     # decides active / inactive
@@ -46,13 +46,7 @@ def prepare(job):
         load_session(person, scenario, overwrite)
         return None
     except Exception:
-        return f'{person}/{scenario}: {traceback.format_exc().strip().splitlines()[-1]}'
-
-
-def spread(x):
-    """median [10th-90th percentile]"""
-    q = np.nanpercentile(x, [50, 10, 90])
-    return f'{q[0]:.3f} [{q[1]:.3f}-{q[2]:.3f}]'
+        return f'{person}/{scenario}: {error_summary()}'
 
 
 if __name__ == '__main__':
@@ -61,24 +55,16 @@ if __name__ == '__main__':
     ap.add_argument('--workers', type=int, default=1, help='recordings prepared in parallel')
     ap.add_argument('--overwrite', action='store_true', help='recompute cached features, MoCap signals, alignment')
     args = ap.parse_args()
-    recs = [parse_recording(r) for r in args.only] if args.only else find_recordings()
-    recs = [r for r in recs if os.path.exists(cube_path(*r))]
-    usable = [r for r in recs if os.path.exists(os.path.join(LABEL_ROOT, *r, 'timestamps.csv'))
-              and subject(*r)['track'] is not None]
+    recs = [r for r in recordings(args.only) if os.path.exists(cube_path(*r))]
+    usable = [r for r in recs if has_labels(*r) and subject(*r)['track'] is not None]
     skipped = [r for r in recs if r not in usable]
     if skipped:
         print('skipped, no MoCap or no labels:', ' '.join('/'.join(r) for r in skipped))
-    out = os.path.join(OUTPUT_ROOT, 'category1')
+    out = category_dir(1)
     os.makedirs(out, exist_ok=True)
-    pd.set_option('display.width', 200)
-    pd.set_option('display.max_columns', 20)
+    wide_tables(max_columns=20)
 
-    jobs = [(r, args.overwrite) for r in usable]
-    if args.workers > 1:
-        with Pool(args.workers) as pool:
-            errors = pool.map(prepare, jobs)
-    else:
-        errors = [prepare(j) for j in jobs]
+    errors = parallel_map(prepare, [(r, args.overwrite) for r in usable], args.workers)
     failed = [e for e in errors if e]
     if failed:
         print(f'{len(failed)} recordings FAILED and are left out:\n  ' + '\n  '.join(failed))
@@ -122,7 +108,7 @@ if __name__ == '__main__':
 
     pd.DataFrame([dict(rec=s.name, person=s.person, active_feature=ACTIVE_FEATURE, energy_feature=ENERGY_FEATURE,
                        radar_threshold=thresholds[ACTIVE_FEATURE][s.name], mocap_threshold=gt_thr[s.person])
-                  for s in sessions]).to_csv(f'{out}/thresholds.csv', index=False)
+                  for s in sessions]).to_csv(CATEGORY1_THRESHOLDS, index=False)
     mt = ev.metric_table(sessions, thresholds[ACTIVE_FEATURE], gt_thr, category=1, active_feature=ACTIVE_FEATURE,
                          energy_feature=ENERGY_FEATURE)
     mt.to_csv(f'{out}/metrics.csv', index=False)
@@ -135,7 +121,7 @@ if __name__ == '__main__':
     times = mt[mt.metric == 'active_time']
     print(f'active time per recording: MoCap {spread(times.mocap)} min, radar {spread(times.radar)} min')
 
-    pooled = ev.best_threshold(table.loc[table.window, ACTIVE_FEATURE].values, table.loc[table.window, 'active'].values)
+    pooled = best_threshold(table.loc[table.window, ACTIVE_FEATURE].values, table.loc[table.window, 'active'].values)
     per_label = ev.per_label(table, ACTIVE_FEATURE, pooled).reset_index().assign(threshold=pooled)
     per_label.to_csv(f'{out}/per_label.csv', index=False)
     print(f'\nper scripted activity (pooled threshold {pooled:.2f}):\n{per_label.round(2).to_string(index=False)}')

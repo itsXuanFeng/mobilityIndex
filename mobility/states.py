@@ -9,10 +9,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import EPOCH_S, FPS, MAX_MOCAP_RMS
+from .config import EPOCH_FRAMES, EPOCH_S, MAX_MOCAP_RMS
 from .groundtruth import active_speed_thresholds
 from .radar.features import FEATURES
-from .utils import epoch_mean, log_level
+from .utils import epoch_mean, fold_of, log_level
 
 
 @dataclass
@@ -30,15 +30,14 @@ class States:
 
 
 def _epochs(session, window):
-    n = int(round(EPOCH_S * FPS))
+    n = EPOCH_FRAMES
     t = session.t[::n][:len(session.t) // n]
-    valid = epoch_mean(session.masks[window], n) >= 0.5
-    return n, t, valid
+    return n, t, session.epoch_mask(window, n)
 
 
 def feature_level(session, name, n=None):
     """per-epoch level of a radar feature: epoch mean of its log level (log features) or of the value"""
-    n = n or int(round(EPOCH_S * FPS))
+    n = n or EPOCH_FRAMES
     x = session.radar[name]
     return epoch_mean(log_level(x) if FEATURES[name].log else x, n)
 
@@ -60,8 +59,7 @@ def mocap_states(session, active_speed=None, window='window'):
     active_speed: the threshold calibrated against the activity labels without this person
     (scripts/calibrate_mocap_threshold.py). Epochs faster than MAX_MOCAP_RMS are tracking jumps: not valid."""
     if active_speed is None:
-        thr = active_speed_thresholds()
-        active_speed = thr.get(session.person, thr['ALL'])   # 'ALL': people outside the calibration
+        active_speed = fold_of(active_speed_thresholds(), session.person)
     n, t, valid = _epochs(session, window)
     energy = epoch_mean(session.mocap['ke'], n)
     level = np.sqrt(energy)

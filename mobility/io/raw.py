@@ -5,7 +5,10 @@ Byte layout and missing-data cases: docs/raw_data_january.md. Adapted from the o
 """
 import json
 import os
+import queue
 import re
+import threading
+import time
 
 import numpy as np
 
@@ -17,6 +20,8 @@ N_RX = 4
 # The DCA1000 splits a recording into .bin files of FILE_BYTES each (1024 MB rounded down to whole 1456-byte packets).
 # Raw_<k> starts at byte k * FILE_BYTES of the recording, also when earlier files are truncated or missing.
 FILE_BYTES = 1073741760
+
+BATCH = 64   # frames per batch handed to the GPU (BatchReader)
 
 # Raw_15 doesn't align with its position in the recording (Raw_12-14 are missing and Raw_11 is truncated)
 EXCLUDE = {('person_6', 'scenario_3'): ['test2x_1_Raw_15.bin']}
@@ -114,3 +119,43 @@ def read_frames(paths, offsets, frames_per_chunk=64):
                 frames.imag[..., 1::2] = q[..., 3]
                 for k in range(n):
                     yield first + k, frames[k]
+
+
+def _batches(paths, offsets, q, batch):
+    """reader thread: batches of consecutive frames, so reading overlaps with the GPU work"""
+    buf, idx = [], []
+    try:
+        for i, frame in read_frames(paths, offsets, frames_per_chunk=batch):
+            if buf and (i != idx[-1] + 1 or len(buf) == batch):
+                q.put((idx[0], np.stack(buf)))
+                buf, idx = [], []
+            buf.append(frame)
+            idx.append(i)
+        if buf:
+            q.put((idx[0], np.stack(buf)))
+    finally:
+        q.put(None)
+
+
+class BatchReader:
+    """
+    Batches of consecutive frames of a recording, read by a background thread so that reading (network-bound)
+    overlaps with the compute. Iterate for (index of the first frame, (n, loops, chirps, rx, samples) complex64);
+    a batch ends at BATCH frames or at a gap in the data. wait_s: time spent waiting for data so far.
+    """
+
+    def __init__(self, paths, offsets, batch=BATCH, maxsize=8):
+        self._q = queue.Queue(maxsize=maxsize)
+        threading.Thread(target=_batches, args=(paths, offsets, self._q, batch), daemon=True).start()
+        self.wait_s = 0.0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        t = time.time()
+        item = self._q.get()
+        self.wait_s += time.time() - t
+        if item is None:
+            raise StopIteration
+        return item

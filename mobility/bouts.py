@@ -16,6 +16,8 @@ min_bout are calibrated together against the activity labels, leaving the evalua
 (scripts/calibrate_bout_rule.py): the combination that, applied to the MoCap joint speed, best separates active from
 inactive label epochs (balanced accuracy). The radar exit and confirmation thresholds are calibrated against the MoCap
 bouts, also leaving the person out (mobility.evaluation.loso_radar_bout_levels).
+
+Radar and MoCap bouts are compared one to one (match_bouts), by intersection over union.
 """
 import os
 from dataclasses import dataclass
@@ -25,6 +27,7 @@ import pandas as pd
 
 from .config import GROUNDTRUTH_DIR
 from .labels import ACTIVE, INACTIVE
+from .utils import read_calibration, runs
 
 BOUT_RULE_FILE = os.path.join(GROUNDTRUTH_DIR, 'bout_rule.csv')
 GRID_GAP = range(0, 4)        # max_gap candidates, epochs
@@ -34,6 +37,7 @@ GRID_CONFIRM = (1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5)     # MoCap confirmation thre
 # balanced accuracies this close to the best count as tied: well below the spread between leave-person-out folds
 # (~0.005), so the labels can't tell such candidates apart; the least smoothing among them is taken
 LABEL_TOLERANCE = 0.001
+BOUT_MATCH_IOU = 0.5   # a radar bout and a MoCap bout match when they overlap by at least this intersection over union
 
 
 @dataclass(frozen=True)
@@ -43,13 +47,6 @@ class BoutRule:
 
     def __str__(self):
         return f'gaps <= {self.max_gap} filled, bouts >= {self.min_bout}'
-
-
-def runs(mask):
-    """(n, 2) int array of [start, end) of the runs of True"""
-    m = np.concatenate([[False], np.asarray(mask, bool), [False]])
-    d = np.flatnonzero(np.diff(m.astype(np.int8)))
-    return d.reshape(-1, 2)
 
 
 def _level(level):
@@ -101,6 +98,32 @@ def in_bouts(active, valid, rule):
 def bouts(active, valid, rule):
     """(n, 2) [start, end) epoch indices of the bouts"""
     return runs(in_bouts(active, valid, rule))
+
+
+def level_bouts(level, valid, entry, exit_threshold, confirm_threshold, rule):
+    """(n, 2) [start, end) epoch indices of the bouts of an activity level: active above the entry threshold, then
+    hysteresis, confirmation and the bout rule"""
+    return bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold), valid, rule)
+
+
+def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
+    """one-to-one matching of (n, 2) and (m, 2) [start, end) bouts, greedily by intersection over union.
+    Returns {index in ref: index in est}."""
+    if not len(ref) or not len(est):
+        return {}
+    inter = np.clip(np.minimum(ref[:, None, 1], est[None, :, 1]) - np.maximum(ref[:, None, 0], est[None, :, 0]), 0,
+                    None)
+    union = (ref[:, None, 1] - ref[:, None, 0]) + (est[None, :, 1] - est[None, :, 0]) - inter
+    iou = inter / union
+    out, used = {}, set()
+    for k in np.argsort(-iou, axis=None):
+        i, j = np.unravel_index(k, iou.shape)
+        if iou[i, j] < min_iou:
+            break
+        if i not in out and j not in used:
+            out[i] = j
+            used.add(j)
+    return out
 
 
 def transition_probability(active, valid):
@@ -164,9 +187,7 @@ def calibrate_bout_rule(confusion, exclude_person=None, tolerance=LABEL_TOLERANC
 
 def bout_rules(path=BOUT_RULE_FILE, epoch_s=1.0):
     """{person: BoutRule calibrated without that person, 'ALL': on every person}, from scripts/calibrate_bout_rule.py"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run scripts/calibrate_bout_rule.py first')
-    d = pd.read_csv(path)
+    d = read_calibration(path, 'scripts/calibrate_bout_rule.py')
     return {r.person: BoutRule(int(round(r.max_gap_s / epoch_s)), int(round(r.min_bout_s / epoch_s)))
             for r in d.itertuples()}
 
@@ -174,7 +195,5 @@ def bout_rules(path=BOUT_RULE_FILE, epoch_s=1.0):
 def mocap_level_factors(path=BOUT_RULE_FILE):
     """{person: (exit, confirmation) threshold of MoCap / its entry threshold, calibrated without that person; 'ALL':
     on every person}"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run scripts/calibrate_bout_rule.py first')
-    d = pd.read_csv(path)
+    d = read_calibration(path, 'scripts/calibrate_bout_rule.py')
     return {r.person: (r.mocap_exit_factor, r.mocap_confirm_factor) for r in d.itertuples()}

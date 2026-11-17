@@ -22,6 +22,8 @@ Radar, comparison (range and Doppler only, the first version; with or without th
     4. events      bursts that are a transition with probability >= min_prob, one per direction within NMS_S (the
                    most probable). min_prob is calibrated like a threshold: on out-of-fold classifications of the
                    other persons (calibrate_min_prob).
+Hand-rule baseline (hand_rule_events): thresholds on a burst's speed, range change and duration; finds transitions,
+not their kind.
 
 Peak speed: max |radial speed| within PEAK_HALF_S of the event time. MoCap: the fastest joint along the line to the
 radar (signal vr_max). Radar, main method: a power-weighted quantile of the person's moving speeds (angle features
@@ -32,8 +34,10 @@ import numpy as np
 import pandas as pd
 
 from .config import FPS, RADAR_XYZ
+from .io.mocap import MOCAP_FPS
+from .labels import caregiver_period, script_period
 from .posture import FLOOR, LEVEL, LYING, SITTING, STANDING, UNKNOWN, label_transitions, radar_height
-from .utils import log_level, nan_smooth
+from .utils import log_level, nan_smooth, runs
 
 SHORT = {STANDING: 'stand', SITTING: 'sit', LYING: 'lie'}
 COUNTED = ('sit_to_stand', 'stand_to_sit', 'lie_to_sit')     # the transitions counted by the Category 3 metrics
@@ -91,6 +95,18 @@ def posture_transitions(t, posture, min_hold_s, fps=FPS):
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
 
 
+def mocap_script_transitions(sig, labels, rule):
+    """the MoCap transitions of 50 Hz MoCap signals (mobility.groundtruth.mocap_50hz) under a posture rule, inside the
+    scripted period and outside the caregiver visit: what the scripted changes are compared with"""
+    ev = posture_transitions(sig['t'], rule.classify(sig), rule.min_hold_s, fps=MOCAP_FPS)
+    s0, s1 = script_period(labels)
+    keep = (ev.t >= s0) & (ev.t <= s1)
+    care = caregiver_period(labels)
+    if care:
+        keep &= ~((ev.t >= care[0]) & (ev.t <= care[1]))
+    return ev[keep].reset_index(drop=True)
+
+
 def mocap_transitions(session, rule):
     """the MoCap transitions of a session (on the radar frames), with their peak radial speed and offaxis_m, the
     horizontal distance of the centre of gravity from the point below the radar"""
@@ -130,11 +146,6 @@ def _mean(x, i0, i1):
     return float(np.nanmean(x)) if len(x) and not np.isnan(x).all() else np.nan
 
 
-def _runs(mask):
-    m = np.concatenate([[False], mask, [False]])
-    return np.flatnonzero(np.diff(m.astype(np.int8))).reshape(-1, 2)
-
-
 BURST_FEATURES = ['direction', 'duration', 'v_smooth', 'r0', 'r1', 'rise', 'r_pre', 'r_post', 'd_pre', 'd_post',
                   'moving_pre', 'moving_post', 'level_in', 'level_pre', 'level_post', 'since_prev', 'until_next']
 # with the angle: the top-of-body height before / after instead of only the slant range, and where the person is
@@ -170,7 +181,7 @@ def bursts(session):
     rows = []
     for sign in (1, -1):
         merged = []
-        for a, b in _runs(sign * v > V_ON):
+        for a, b in runs(sign * v > V_ON):
             if merged and a - merged[-1][1] <= MERGE_GAP_S * FPS:
                 merged[-1][1] = b
             else:
@@ -282,6 +293,19 @@ def calibrate_min_prob(recordings, grid=GRID_MIN_PROB, tol=MATCH_TOL_S):
         if f1 > best_f1:
             best, best_f1 = g, f1
     return float(best), best_f1
+
+
+def hand_rule_events(b, v_min, rise_min, dur_min, nms_s=NMS_S):
+    """hand-rule baseline: bursts passing the three thresholds (speed v_smooth, range change rise, duration), one per
+    direction within nms_s (the fastest)"""
+    k = b[(b.v_smooth >= v_min) & (b.rise >= rise_min) & (b.duration >= dur_min)].sort_values('v_smooth',
+                                                                                              ascending=False)
+    kept = []
+    for x in k.itertuples():
+        if not any(abs(x.t - y.t) < nms_s and x.direction == y.direction for y in kept):
+            kept.append(x)
+    return pd.DataFrame([dict(t=x.t, kind='transition', direction=x.direction) for x in kept],
+                        columns=['t', 'kind', 'direction'])
 
 
 # ---- matching ----

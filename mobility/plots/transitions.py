@@ -14,7 +14,7 @@ from matplotlib.patches import Patch
 
 from ..posture import LEVEL, POSTURES, UNKNOWN
 from . import style
-from .agreement import EPISODES, _episode_span, _hatch_unevaluated, _label_spans, _strip_axes
+from .common import EPISODES, episode_span, hatch_unevaluated, label_spans, strip_axes
 
 SHORT_KIND = {'sit_to_stand': 'stand up', 'stand_to_sit': 'sit down', 'lie_to_sit': 'sit up', 'sit_to_lie': 'lie down',
               'stand_to_lie': 'lie down', 'lie_to_stand': 'get up', 'to_floor': 'to floor', 'from_floor': 'from floor'}
@@ -42,17 +42,17 @@ def _rows(axes, session, posture, radar_posture, height, events, t0, scale, sel,
     x = (t - t0) / scale
     w = 1 / (20 * scale)
     win = session.masks['window'][sel]
-    _label_spans(axes[0], session.labels, t0, scale, names_until=(x[-1] - x[0]) if names else None)
-    _strip_axes(axes[0], 'activity\nlabel')
+    label_spans(axes[0], session.labels, t0, scale, names_until=(x[-1] - x[0]) if names else None)
+    strip_axes(axes[0], 'activity\nlabel')
 
-    _hatch_unevaluated(axes[1], x, w, win)
+    hatch_unevaluated(axes[1], x, w, win)
     axes[1].plot(x, _level(posture[sel]) + 0.08, color=style.MOCAP, linewidth=1.2, drawstyle='steps-post')
     axes[1].plot(x, _level(radar_posture[sel]) - 0.08, color=style.RADAR, linewidth=1.2, drawstyle='steps-post')
     axes[1].set_yticks([LEVEL[k] for k in range(4)], [POSTURES[k] for k in range(4)])
     axes[1].set_ylim(-0.5, 3.5)
     axes[1].set_ylabel('posture')
 
-    _hatch_unevaluated(axes[2], x, w, win)
+    hatch_unevaluated(axes[2], x, w, win)
     when = events.t_s.values + session.t[0]                 # epoch s
     for src, y, colour in (('mocap', 0.7, style.MOCAP), ('radar', 0.3, style.RADAR)):
         e = events[(events.source == src).values & (when >= t[0]) & (when <= t[-1])]
@@ -68,7 +68,7 @@ def _rows(axes, session, posture, radar_posture, height, events, t0, scale, sel,
     axes[2].grid(False)
     axes[2].set_ylabel('transitions')
 
-    _hatch_unevaluated(axes[3], x, w, win)
+    hatch_unevaluated(axes[3], x, w, win)
     axes[3].plot(x, session.mocap['head_y'][sel], color=style.MOCAP, linewidth=1.0)
     axes[3].plot(x, height[sel], '.', color=style.RADAR, markersize=1.5)
     axes[3].set_ylim(-0.1, 2.0)
@@ -81,7 +81,7 @@ def transitions_figure(session, posture, radar_posture, height, events, path, ep
     """posture, radar_posture: posture code per frame of MoCap and of the radar; height: the radar's top-of-body
     height per frame; events: mobility.evaluation.transition_events of the recording (t in s since the first frame)"""
     style.apply()
-    span = _episode_span(session.labels, episode[1], episode[2])
+    span = episode_span(session.labels, episode[1], episode[2])
     ratios = [0.35, 0.9, 0.6, 1.2]
     fig, ax = plt.subplots(9 if span else 4, 1, figsize=(12, 10.5 if span else 5.2),
                            gridspec_kw=dict(height_ratios=ratios + ([0.9] + ratios if span else []), hspace=0.18))

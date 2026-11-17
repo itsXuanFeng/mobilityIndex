@@ -18,7 +18,7 @@ The cube (`rd12_db.npy`) averages the 12 virtual channels, so it has range and D
 | `points.npz` | one row per kept cell ("point"), sorted by frame: `frame` (int32, = cube row), `rbin`, `dbin` (uint8, as in the cube), `db` (float16, 12-channel mean power as in the cube), `iq` (float16, N × 12 × 2: the complex value per virtual channel divided by the largest of the 12) |
 | `points_info.json` | frames read and skipped, points, size, timing, device |
 
-- **Kept cells:** range ≥ 0.3 m, any Doppler bin except zero velocity, more than 6 dB above the cell's noise floor. The floor is the recording's own, from the cube (`mobility.session.noise_floor`), so the cube and its features must exist first. Slow bins (breathing, small movements, ~0.04 m/s) are kept on purpose: they may locate a person who keeps still. About 280 points per frame on average (median frame: about 100).
+- **Kept cells:** range ≥ 0.3 m, any Doppler bin except zero velocity, more than 6 dB above the cell's noise floor. The floor is the recording's own, from the cube (`mobility.radar.cache.recording_noise_floor`), so the cube and its features must exist first. Slow bins (breathing, small movements, ~0.04 m/s) are kept on purpose: they may locate a person who keeps still. About 280 points per frame on average (median frame: about 100).
 - **Only the measurement is stored.** No angle method, RX phase correction, TDM correction or orientation is applied, so all of them can change later without re-reading the raw data. Normalising each point's 12 values by their largest keeps phases and relative amplitudes exact enough in float16.
 - **Skipped frames:** without data or damaged by lost packets, the frames that are NaN in the cube.
 
