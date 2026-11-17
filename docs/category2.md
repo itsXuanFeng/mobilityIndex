@@ -1,6 +1,6 @@
 # Category 2: activity bout structure
 
-*Number of bouts, mean and variance of bout duration, fragmentation index*, from the ceiling FMCW radar, validated against MoCap on the full January 2026 campaign. Category 2 is built on the per-epoch activity level and active/inactive calls of [Category 1](category1.md): same recordings, same alignment, same evaluation window, same leave-one-subject-out thresholds. This note covers only what Category 2 adds. The code is in `mobility/bouts.py` and `mobility/metrics/category2.py`. The numbers come from `scripts/calibrate_bout_rule.py` (written to `output/groundtruth/`) and `scripts/evaluate_category2.py` (written to `output/category2/`); see [Runs and outputs](#runs-and-outputs).
+*Number of bouts, mean and variance of bout duration, fragmentation index*, from the ceiling FMCW radar, validated against MoCap on the full January 2026 campaign. Category 2 is built on the per-epoch activity level and active/inactive calls of [Category 1](category1.md): same recordings, same alignment, same evaluation window, same leave-one-subject-out thresholds. This note covers only what Category 2 adds. The code is in `mobility/bouts.py` (bout definition and its calibration against the labels), `mobility/metrics/category2.py` (the metrics) and `mobility/evaluation/category2.py` (bout matching, radar calibration). The numbers come from `scripts/calibrate_bout_rule.py` (written to `output/groundtruth/`) and `scripts/evaluate_category2.py` (written to `output/category2/`); see [Runs and outputs](#runs-and-outputs).
 
 ## Summary
 
@@ -22,6 +22,7 @@
 - **Nothing is set by hand.**
   - The MoCap exit and confirmation thresholds (0.5× and 1.6× the active speed) and the bout rule are calibrated against the activity labels, leaving the evaluated person out. The labels support the definition: held-out F1 against the labels rises from 0.881 (plain threshold) to 0.918.
   - The radar thresholds are calibrated against the MoCap bouts, also leaving the person out.
+- **The fragmentation index is biased: the radar is higher for 25 of 27 people** (+9% per recording). It is the same bias as the radar's slightly shorter bouts (mean duration −5.5%), because, as defined now, the fragmentation index is almost 1 / mean bout duration. Calibrating the radar's exit threshold on bout duration instead of the count cut the bias to +4% in a one-off check; it isn't in the pipeline yet ([Fragmentation index](#fragmentation-index-bias-and-definition)).
 - **The script still limits what the bout count can show.** Every recording follows the same 38 steps (MoCap bout count 20–26), and the radar's count error is 0.86× the guess. The campaign confirms that the radar sees the same bouts as MoCap and measures their durations and spread. It can't show that bout counts tell people apart.
 - **Main bottlenecks:**
   - the scripted protocol (above);
@@ -149,7 +150,7 @@ The count pins ε down sharply at 0.5, about 3× the active number of moving cel
 
 ### 4. Metrics
 
-The metrics are one rule each, applied to the radar and the MoCap `States` alike ([mobility/metrics/category2.py](../mobility/metrics/category2.py)). The bout definition comes from `States.extra` (`exit_threshold`, `confirm_threshold`, `bout_rule`), which `mobility.evaluation.metric_table` sets.
+The metrics are one rule each, applied to the radar and the MoCap `States` alike ([mobility/metrics/category2.py](../mobility/metrics/category2.py)). The bout definition comes from `States.extra` (`exit_threshold`, `confirm_threshold`, `bout_rule`). `metric_table` (`mobility/evaluation/agreement.py`) sets them through `set_bout_levels` (`mobility/metrics/category2.py`).
 
 | Metric | Unit | Rule |
 |---|---|---|
@@ -160,7 +161,7 @@ The metrics are one rule each, applied to the radar and the MoCap `States` alike
 
 **Why the fragmentation index is taken before the bout rule.** SCOPE.md suggests bouts per active hour or the transition probability. On the bouts themselves, both are the same quantity: the probability is exactly 1 / mean bout duration (in epochs), and bouts per active hour is the same up to a factor. Either would repeat the mean duration.
 
-**Caveat with the current definition.** The calibrated rule has no gap filling and no minimum bout, so the bout rule changes nothing. The fragmentation index is therefore computed on the same sequence as the bouts and is almost 1 / mean bout duration: the correlation across recordings is 0.99 for both radar and MoCap. It differs only through bouts cut at the window edge. As defined now, it adds no information beyond the mean duration (see [Still open](#decisions)).
+**Caveat with the current definition.** The calibrated rule has no gap filling and no minimum bout, so the bout rule changes nothing. The fragmentation index is therefore computed on the same sequence as the bouts and is almost 1 / mean bout duration: the correlation across recordings is 0.99 for both radar and MoCap. It differs only through bouts cut at the window edge. As defined now, it adds no information beyond the mean duration. Alternative definitions are compared in [Fragmentation index](#fragmentation-index-bias-and-definition).
 
 ### 5. Evaluation
 
@@ -192,14 +193,15 @@ All results are on the 148 evaluated recordings (27 people). "Median (10th–90t
 
 - **Durations, their spread and fragmentation are measured, not just guessed from the script.** For mean duration, variance and fragmentation, the radar's error is 0.4–0.7× the no-sensor guess.
 - **The variance's relative error is largely a matter of units.** Squaring the durations doubles the relative error. Each recording's variance also depends on its longest bout (median 25 s), which carries about 45% of the sum of squares.
-- **The bout count is only slightly better than the guess:** 1.8 vs 2.1 bouts, on a spread of 20–26 between recordings.
-- **Per person:**
+- **The SD of bout duration** (the square root of the variance, in seconds) carries the same information on the scale of the durations. It is reported here alongside the variance, not as a SCOPE metric:
 
-  | Metric | Mean error per person |
-  |---|---|
-  | number of bouts | −3.0 (person_1) to +3.3 (person_24) |
-  | mean bout duration | −1.5 s (person_26) to +0.6 s (person_25) |
-  | fragmentation index | −0.006 (person_11) to +0.038 (person_12) |
+  | | MoCap | Error (relative) | Bias | No-sensor error | Radar / no-sensor |
+  |---|---|---|---|---|---|
+  | SD of bout duration | 6.2 s | **0.55 s** (8.6%) | −0.14 s | 1.30 s | 0.42 |
+
+  Its relative error is about half the variance's (8.6% vs 16.5%), while the radar is equally good at both (0.42× the guess for both). If the radar's SD is 10% too high, its variance is 1.1² = 1.21 times MoCap's, 21% too high.
+- **The bout count is only slightly better than the guess:** 1.8 vs 2.1 bouts, on a spread of 20–26 between recordings.
+- **The fragmentation index and the mean duration are both biased**, in mirror image: see the next two sections.
 
 **What each step of the definition adds** (relative MAE, with the ratio to the no-sensor guess in brackets):
 
@@ -211,6 +213,68 @@ All results are on the 148 evaluated recordings (27 people). "Median (10th–90t
 | bout duration variance | 24% (0.56×) | 20% (0.51×) | **16.5% (0.42×)** |
 | fragmentation index | 11.4% (0.95×) | 9.4% (0.67×) | **10.6% (0.66×)** |
 | held-out F1 of MoCap against the labels | 0.883 | 0.896 | **0.918** |
+
+### Per person
+
+`scripts/plot_per_person_category2.py` draws the signed error per person, in % of the MoCap value, 100 × (radar − MoCap) / MoCap per recording. Bars are each person's mean over their recordings; dots are the recordings. All four panels share one y-scale.
+
+![Category 2, signed error per person](../output/plots/per_person/per_person_bouts_bias.png)
+
+| Metric | Mean signed error | Mean absolute error | People with the radar too high |
+|---|---|---|---|
+| number of bouts | +1.3% | 8.0% | 15 of 27 |
+| mean bout duration | −5.5% | 8.3% | 5 of 27 |
+| SD of bout duration | −1.8% | 8.9% | 11 of 27 |
+| fragmentation index | +9.2% | 11.1% | 25 of 27 |
+
+These are means of per-recording percentages. They differ slightly from the relative errors above (7.8%, 8.5%, 8.6%, 10.6%), which divide the mean absolute error by the mean MoCap value. In the per-recording version, recordings with small MoCap values weigh a little more.
+
+- **Number of bouts and SD: no common direction.** Each person's recordings scatter by about ±10–20% on both sides. A few people lean one way:
+  - fewer radar bouts: p1 and p25 (about −11%);
+  - more radar bouts: p24, p7, p5 (+12 to +14%).
+- **Mean bout duration and fragmentation: one common direction.** The radar's bouts are shorter for 22 of 27 people (of the other five, p4 and p15 are at +0.1%) and its fragmentation higher for 25 of 27. The same people stand out in both: p12 (−16% duration, +26% fragmentation) and p26 (−18%, +24%).
+- **p25 goes the other way on every metric:** fewer (−11%), longer (+7.5%) bouts with a larger spread (+11%), and lower fragmentation (−3%). Its radar bouts probably merge movements that MoCap keeps separate. p12 and p26 are the opposite case.
+
+### Fragmentation index: bias and definition
+
+**Why the radar is higher.** The radar's mean bout duration is about 5% shorter than MoCap's, for two reasons (durations pooled over all bouts of the 148 recordings):
+
+| | MoCap | Radar |
+|---|---|---|
+| mean duration, all bouts | 7.0 s | 6.6 s |
+| mean duration, matched bouts | 7.1 s | 6.9 s |
+| mean duration, unmatched bouts | 5.8 s | 4.1 s |
+
+1. **Matched bouts are 0.23 s shorter.** The radar starts them 0.08 s later and ends them 0.15 s earlier. Its exit threshold is calibrated on the bout count, which barely depends on it (§3), so nothing ties the radar's bout ends to MoCap's.
+2. **The radar's extra bouts are short.** They are mostly the in-bed movements MoCap doesn't confirm (see [Per epoch and per bout](#per-epoch-and-per-bout)), and they pull the radar's mean down.
+
+As defined now, the fragmentation index is almost 1 / mean bout duration, so a shorter mean duration shows up as a higher fragmentation.
+
+**Candidate definitions** (one-off check on the current bouts, 148 recordings; not in the pipeline):
+
+| Fragmentation defined as | Error | Bias | Radar / no-sensor | Correlation of the MoCap value with 1 / mean bout duration |
+|---|---|---|---|---|
+| active → inactive, on the Category 1 epochs (the classic ASTP) | 11.4% | −0.011 | 0.95 | 0.71 |
+| **bout → non-bout** (= the current definition) | 10.6% | +0.012 | 0.66 | 1.00 |
+| non-bout → bout (rest interrupted by a new bout) | 12.7% | −0.002 | 0.73 | 0.28 |
+
+- **Active → inactive on the raw epochs** has its own content, but the radar barely beats the guess. It mostly measures how much each sensor flickers from second to second.
+- **Bout → non-bout** is consistent with the other metrics and accurate, but it is the mean duration again in another form.
+- **Non-bout → bout** asks how often rest is interrupted by a new bout, roughly 1 / mean gap between bouts. It is nearly independent of the mean duration, has almost no bias, and the radar still clearly beats the guess.
+
+**Tested fix for the bias** (one-off check; not in the pipeline). The radar's confirmation threshold stays calibrated on the bout count, since it decides which bouts exist. Its exit threshold is calibrated on the mean bout duration instead, since it decides where bouts end: training mean absolute error, leaving the person out, grid δ 0–1.2. Every fold picks δ = 0.5.
+
+| | Current (exit on the count) | Exit calibrated on mean duration |
+|---|---|---|
+| fragmentation: mean signed error | +9.2% (25 of 27 people too high) | **+4.0%** (20 of 27) |
+| fragmentation: error, radar / no-sensor | 10.6%, 0.66 | **8.0%, 0.50** |
+| mean duration: mean signed error | −5.5% | **−1.8%** |
+| mean duration: error, radar / no-sensor | 8.5%, 0.53 | **7.4%, 0.46** |
+| number of bouts: error, radar / no-sensor | 7.8%, 0.86 | 7.7%, 0.85 |
+| variance: error, radar / no-sensor | 16.5%, 0.42 | 17.3%, 0.44 |
+| bout F1 | 0.907 | 0.909 |
+
+The remaining +4% comes from the short extra radar bouts in bed (reason 2). Raising the radar's confirmation threshold to drop them would cost bout-count accuracy elsewhere, and whether MoCap or the radar is right in bed is open (Bottleneck 2).
 
 ### Per epoch and per bout
 
@@ -226,7 +290,7 @@ All results are on the 148 evaluated recordings (27 people). "Median (10th–90t
 | matched bouts with onset and offset both within ±1 s | 92% |
 | bout duration, all bouts | MoCap 5 s (3–17), radar 4 s (2–16) |
 
-- **The radar now tends to end bouts slightly early** (556 matched bouts early, 300 late): its exit threshold is calibrated on the count, not on the ends. The mean is −0.15 s, well within an epoch.
+- **The radar now tends to end bouts slightly early** (556 matched bouts early, 300 late): its exit threshold is calibrated on the count, not on the ends. The mean is −0.15 s, well within an epoch, but it shortens the radar's bouts and raises its fragmentation index ([Fragmentation index](#fragmentation-index-bias-and-definition)).
 - **Lowest bout F1:** 0.67–0.76, in person_23/scenario_1, person_15/scenario_3, person_1/scenario_5, person_25/scenario_2, person_27/scenario_6 and person_26 (scenarios 1, 5, 6). 10 recordings score below 0.8.
 
 **What the unmatched bouts are.**
@@ -292,15 +356,17 @@ Agreement for other radar thresholds, all people alike, with the MoCap definitio
 
 | Run | When | Command | Output |
 |---|---|---|---|
-| MoCap bout definition calibration | 2026-11-02, about 1 min | `python scripts/calibrate_bout_rule.py` | `output/groundtruth/bout_rule.csv`, `bout_rule_grid.csv` |
-| Category 2 evaluation, with the radar calibration | 2026-11-02, 1.5 min (session caches from Category 1) | `python scripts/evaluate_category2.py --workers 16` | `output/category2/`; log `output/category2_full.log` |
-| bout figures | 2026-11-02 | `python scripts/plot_bouts.py --only ...` | `output/plots/bouts/` |
+| MoCap bout definition calibration | 2026-11-17, about 1 min | `python scripts/calibrate_bout_rule.py` | `output/groundtruth/bout_rule.csv`, `bout_rule_grid.csv` |
+| Category 2 evaluation, with the radar calibration | 2026-11-17, 1.5 min (session caches from Category 1) | `python scripts/evaluate_category2.py --workers 16` | `output/category2/`; log `output/category2_full.log` |
+| bout figures | 2026-11-17 | `python scripts/plot_bouts.py --only ...` | `output/plots/bouts/` |
+| signed error per person | 2026-11-17 | `python scripts/plot_per_person_category2.py` | `output/plots/per_person/per_person_bouts_bias.png` |
+| fragmentation definitions, exit calibrated on duration | 2026-11-03 | one-off checks, not in the repository | numbers in [Fragmentation index](#fragmentation-index-bias-and-definition) |
 
 Machine and env: `barabas`, `distrimuse` conda env.
 
 **Inputs and code version.**
 - **Inputs:** the Category 1 thresholds (`output/category1/thresholds.csv`) and the MoCap epochs and thresholds in `output/groundtruth/`, from the runs in [Category 1](category1.md#runs-and-outputs).
-- **Code:** the runs used the working tree on top of commit `ae6077f`. The Category 2 changes are not committed yet: hysteresis, confirmation, the radar calibration (`mobility/bouts.py`, `mobility/metrics/category2.py`, `mobility/evaluation.py`, the three Category 2 scripts, `mobility/plots/bouts.py`). Commit them to pin the version that produced these numbers.
+- **Code:** commit `6ea79f9` (2026-11-17, "Refactor: evaluation package, script helpers, shared plot modules"). The bout definition with hysteresis and confirmation and the radar calibration came in commit `21f49c4` (2026-11-04). The refactor in `6ea79f9` moved code without changing results: rerunning Category 2 with it reproduces every output table of the 2026-11-02 run exactly.
 
 **Tables in `output/category2/`:**
 
@@ -319,7 +385,7 @@ Machine and env: `barabas`, `distrimuse` conda env.
 
 1. **The script imposes the bout count.** Every recording follows the same 38 steps, so the number of bouts hardly varies between people (MoCap 20–26), and a guess without a sensor is almost as close as the radar (0.86×). The campaign validates that the radar *sees the same bouts* and measures their durations and spread. It can't validate the bout count as a measure that tells people apart; that needs free-living or less scripted recordings.
 2. **Movements in bed.** Since the confirmation threshold, this is the main disagreement: the radar counts sitting up and lying down in bed as bouts (+0.65 per recording) where MoCap often doesn't confirm them. The blanket is the likely reason, but the labels can't settle it: they mark these movements as active, yet MoCap's level stays low. Settling it would need an independent reference in bed.
-3. **The variance depends on a few long bouts.** The longest bout of a recording carries about 45% of its sum of squares, so one bout that the radar ends or splits differently moves the variance a lot. The SD (same information, in seconds) or the variance of log durations would be less sensitive, but they answer a slightly different question than SCOPE.md's variance.
+3. **The variance depends on a few long bouts.** The longest bout of a recording carries about 45% of its sum of squares, so one bout that the radar ends or splits differently moves the variance a lot. The SD (same information, in seconds; error 8.6%) or the variance of log durations would read less extreme, but they answer a slightly different question than SCOPE.md's variance.
 4. **The thresholds are only loosely determined in places.** For MoCap, the gap rule is not determined by the labels at all (§2; resolved by the tie rule). For the radar, δ matters little (§3). The results don't hinge on these values, but a different campaign may calibrate somewhat different ones.
 5. **Inherited from Category 1:**
    - a third of the radar time can't be evaluated;
@@ -344,7 +410,9 @@ Machine and env: `barabas`, `distrimuse` conda env.
 Still open:
 - **Validating between-person differences:** needs recordings that are not scripted (Bottleneck 1).
 - **Which sensor to trust in bed** (Bottleneck 2).
-- **The fragmentation index has become redundant** with the mean duration (correlation 0.99; see [§4](#4-metrics)). Taking it before the confirmation, or on the Category 1 active / inactive sequence, would give it its own content again: fragmentation at the level of single active epochs. That is a change of definition, not yet made.
+- **Fragmentation index: two decisions** ([Fragmentation index](#fragmentation-index-bias-and-definition)):
+  - calibrate the radar's exit threshold on the mean bout duration instead of the count (bias +9% → +4%);
+  - keep the definition bout → non-bout, which equals 1 / mean bout duration, or switch to non-bout → bout, which carries its own information and has almost no bias.
 
 ## Reproducing
 
@@ -354,4 +422,5 @@ PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3
 $PY scripts/calibrate_bout_rule.py                                 # ~1 min, MoCap + labels only
 $PY scripts/evaluate_category2.py --workers 16                     # ~1.5 min with the session caches
 $PY scripts/plot_bouts.py --only person_10/scenario_2 person_23/scenario_1
+$PY scripts/plot_per_person_category2.py                           # signed error per person
 ```

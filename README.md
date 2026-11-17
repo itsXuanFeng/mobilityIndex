@@ -93,6 +93,9 @@ $PY scripts/evaluate_category3.py --workers 16
 $PY scripts/plot_agreement.py --only person_10/scenario_2
 $PY scripts/plot_bouts.py --only person_10/scenario_2
 $PY scripts/plot_transitions.py --only person_10/scenario_2
+# per person: Category 1 scores and energy error, Category 2 signed errors (after steps 3-4)
+$PY scripts/plot_per_person.py
+$PY scripts/plot_per_person_category2.py
 # diagnostics
 $PY scripts/plot_timeline.py person_1/scenario_1
 # angle pass (product 3; docs/angle.md): second read of the raw data, ~6.5 h for the campaign, after step 1
@@ -113,7 +116,7 @@ Outputs, under `output/`:
 | `groundtruth/bout_rule.csv` | MoCap exit and confirmation factors and bout rule per left-out person (and `ALL`) |
 | `groundtruth/posture_rule.csv` | MoCap posture rule per left-out person (and `ALL`) |
 | `category1/*.csv`, `category2/*.csv`, `category3/*.csv` | evaluation tables |
-| `plots/agreement/`, `plots/bouts/`, `plots/transitions/`, `plots/angle/`, `plots/` | radar vs MoCap over time; bouts; transitions; angle check; diagnostic timelines |
+| `plots/agreement/`, `plots/bouts/`, `plots/transitions/`, `plots/angle/`, `plots/per_person/`, `plots/` | radar vs MoCap over time; bouts; transitions; angle check; per-person errors; diagnostic timelines |
 
 ## Extending
 
