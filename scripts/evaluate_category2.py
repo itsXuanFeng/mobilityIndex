@@ -4,21 +4,23 @@ Category 1 active / inactive calls, so this reuses its leave-one-subject-out thr
 hysteresis. Run first:
     scripts/evaluate_category1.py     (thresholds.csv: radar and MoCap active thresholds per recording)
     scripts/calibrate_bout_rule.py    (MoCap exit and confirmation factors and bout rule per left-out person)
-The radar exit and confirmation thresholds are calibrated here, against the MoCap bout counts, leaving the person out.
+The radar thresholds are calibrated here against the MoCap bouts, leaving the person out: the confirmation on the bout
+count, the exit on the mean bout duration.
 
     python scripts/evaluate_category2.py --workers 16
     python scripts/evaluate_category2.py --only person_1/scenario_1 person_5/scenario_3
 
 Writes to OUTPUT_ROOT/category2/:
     rules.csv              per recording: entry, exit and confirmation thresholds of both sensors, the bout rule
-    radar_levels.csv       per left-out person and radar (exit delta, confirmation eps): training count error, bout F1
+    radar_levels.csv       per left-out person and radar (exit delta, confirmation eps): training count error,
+                           mean-duration error, bout F1
     epoch_scores.csv       per recording: F1 of the radar's active calls and of its in-bout calls (MoCap as reference)
     bout_scores.csv        per recording: bouts of each sensor, matched, precision, recall, F1, onset / offset error
     bouts.csv              every bout of both sensors, matched or not, with the activity label at its middle
     metrics.csv            per recording: the Category 2 metrics, radar vs MoCap
     agreement.csv          per metric across recordings: mean absolute error, bias, no-sensor baseline
-    sensitivity.csv        the same agreement and bout F1 for the radar calibrated on bout F1, for fixed radar
-                           thresholds, and without hysteresis and confirmation
+    sensitivity.csv        the same agreement and bout F1 for the radar exit calibrated on the count too, the radar
+                           calibrated on bout F1, fixed radar thresholds, and without hysteresis and confirmation
 """
 import argparse
 import os
@@ -136,12 +138,16 @@ if __name__ == '__main__':
         print(f'  {k:20s} MoCap {spread(g.mocap)}  radar {spread(g.radar)}  mean error per person '
               f'{per_person.min():+.3f} ({per_person.idxmin()}) to {per_person.max():+.3f} ({per_person.idxmax()})')
 
-    # sensitivity: the radar calibrated on bout F1 instead of the count (leaving the person out, from the same training
-    # table), fixed radar thresholds, and neither hysteresis nor confirmation on either sensor
+    # sensitivity, leaving the person out from the same training table: the radar exit calibrated on the count too
+    # (both thresholds on the count), and the radar calibrated on bout F1; then fixed radar thresholds, and neither
+    # hysteresis nor confirmation on either sensor
+    count_of = {p: tuple(g.sort_values(['count_abs_err', 'eps', 'delta']).iloc[0][['delta', 'eps']])
+                for p, g in radar_table.groupby('person')}
     f1_of = {p: tuple(g.loc[g.bout_f1.idxmax(), ['delta', 'eps']]) for p, g in radar_table.groupby('person')}
-    variants = {'radar calibrated on bout F1': lambda rec, p: levels(rec, p, *f1_of[p])}
+    variants = {'radar exit and confirmation on the count': lambda rec, p: levels(rec, p, *count_of[p]),
+                'radar calibrated on bout F1': lambda rec, p: levels(rec, p, *f1_of[p])}
     for e in (0, 0.3, 0.5, 0.8):
-        for d in (0.2, 0.3):
+        for d in (0.3, 0.5):
             variants[f'radar delta {d}, eps {e}'] = lambda rec, p, d=d, e=e: levels(rec, p, d, e)
     variants['no hysteresis, no confirmation'] = lambda rec, p: (
         (th.radar_threshold[rec],) * 2, (th.mocap_threshold[rec],) * 2)

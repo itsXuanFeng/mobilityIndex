@@ -127,8 +127,9 @@ def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
 
 
 def transition_probability(active, valid):
-    """active -> inactive transition probability per epoch (ASTP), on the sequence before the bout rules: the share of
-    active epochs followed by an inactive one, over pairs of consecutive valid epochs. NaN without active epochs."""
+    """transition probability out of a state per epoch: the share of epochs in `active` that are followed by an epoch
+    not in it, over pairs of consecutive valid epochs. NaN without such epochs. On an active sequence this is the
+    active -> inactive probability (ASTP); on the epochs outside bouts (~in_bout), the non-bout -> bout probability."""
     a, v = np.asarray(active, bool), np.asarray(valid, bool)
     pair = v[:-1] & v[1:] & a[:-1]
     return float((~a[1:][pair]).mean()) if pair.any() else np.nan

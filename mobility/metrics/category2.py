@@ -7,9 +7,9 @@ States.extra['exit_threshold']; confirmation, keeping the runs that exceed State
 bout rule in States.extra['bout_rule'] (gap filling, minimum bout). All are calibrated without the evaluated person;
 mobility.evaluation.metric_table sets them (set_bout_levels).
 
-The fragmentation index is the active -> inactive transition probability after the hysteresis and the confirmation,
-*before* the bout rule.
-On the bouts themselves it would be exactly 1 / mean bout duration, so it would add nothing.
+The fragmentation index is the non-bout -> bout transition probability: how often rest is interrupted by a new bout,
+about 1 / mean rest between bouts. The other direction, bout -> non-bout, would be about 1 / mean bout duration and
+would repeat bout_duration_mean.
 """
 import numpy as np
 
@@ -68,6 +68,6 @@ def bout_duration_var(s):
 
 @metric('fragmentation_index', category=2, unit='per epoch')
 def fragmentation_index(s):
-    """active -> inactive transition probability per epoch (ASTP), after the hysteresis and the confirmation, before
-    the bout rule"""
-    return transition_probability(bout_activity(s), s.valid)
+    """non-bout -> bout transition probability per epoch: the share of valid epochs outside a bout that are followed by
+    an epoch inside one (rest interrupted by a new bout)"""
+    return transition_probability(~in_bout(s), s.valid)

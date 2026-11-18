@@ -1,6 +1,7 @@
 """
 Category 2: bouts per epoch (inside a bout or not) and per bout (matched between radar and MoCap), and the radar
-exit and confirmation thresholds, calibrated leave-one-subject-out against the MoCap bout count.
+exit and confirmation thresholds, calibrated leave-one-subject-out against the MoCap bouts: the confirmation on the
+bout count (it decides which bouts exist), the exit on the mean bout duration (it decides where they end).
 """
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ from ..metrics.category2 import in_bout, set_bout_levels
 from ..utils import runs
 from .agreement import metric_rows
 
-RADAR_EXIT_DELTAS = (0, 0.1, 0.2, 0.3, 0.4)                       # radar exit = entry - delta, on its log10 level
+RADAR_EXIT_DELTAS = (0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2)   # radar exit = entry - delta, on its log10 level
 RADAR_CONFIRM_EPS = (0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0)   # radar confirmation = entry + eps
 
 
@@ -26,28 +27,40 @@ def bout_frame(rs, ms):
 def loso_radar_bout_levels(states, radar_thr, mocap_thr, mocap_factors, rules, deltas=RADAR_EXIT_DELTAS,
                            eps=RADAR_CONFIRM_EPS):
     """radar exit and confirmation thresholds (entry - delta, entry + eps on the log10 level), leaving the person
-    out: for each person p, the pair whose bout count is closest to the MoCap bout count (sum of absolute differences)
-    on the other persons' recordings. As for the active thresholds, those recordings use p's fold: radar entry
-    radar_thr[p]; MoCap entry mocap_thr[p], exit and confirmation mocap_factors[p] x mocap_thr[p]; bout rule rules[p].
-    states: [(person, radar States, MoCap States)]. Ties: the smallest eps, then the smallest delta.
-    Returns ({person: (delta, eps)}, DataFrame of the training count error and bout F1 per person and pair)."""
+    out. For each person p, on the other persons' recordings:
+        1. eps: the confirmation of the pair (delta, eps) whose bout count is closest to the MoCap bout count (sum of
+           absolute differences over recordings). The count hardly depends on delta;
+        2. delta: at that eps, the exit whose mean bout duration is closest to the MoCap mean bout duration (mean
+           absolute difference over recordings).
+    As for the active thresholds, those recordings use p's fold: radar entry radar_thr[p]; MoCap entry mocap_thr[p],
+    exit and confirmation mocap_factors[p] x mocap_thr[p]; bout rule rules[p]. states: [(person, radar States, MoCap
+    States)]. Ties: the smallest eps, then the smallest delta.
+    Returns ({person: (delta, eps)}, DataFrame of the training count error, mean-duration error and bout F1 per person
+    and pair)."""
+    def mean_duration(b):
+        return (b[:, 1] - b[:, 0]).mean() if len(b) else np.nan
+
     out, rows = {}, []
     for p in sorted({q for q, _, _ in states}):
         f_exit, f_conf = mocap_factors[p]
         train = [(rs, ms, level_bouts(ms.level, ms.valid, mocap_thr[p], f_exit * mocap_thr[p], f_conf * mocap_thr[p],
                                       rules[p])) for q, rs, ms in states if q != p]
-        err = {}
+        count_err, dur_err = {}, {}
         for e in eps:
             for d in deltas:
                 n_m = n_r = hit = abs_err = 0
+                dur = []
                 for rs, ms, mb in train:
                     rb = level_bouts(rs.level, rs.valid, radar_thr[p], radar_thr[p] - d, radar_thr[p] + e, rules[p])
                     n_m, n_r, hit = n_m + len(mb), n_r + len(rb), hit + len(match_bouts(mb, rb))
                     abs_err += abs(len(rb) - len(mb))
-                err[(d, e)] = abs_err
+                    dur.append(abs(mean_duration(rb) - mean_duration(mb)))
+                count_err[(d, e)], dur_err[(d, e)] = abs_err, np.nanmean(dur)
                 rows.append(dict(person=p, delta=d, eps=e, count_abs_err=abs_err / len(train),
-                                 bout_f1=2 * hit / (n_m + n_r)))
-        out[p] = min(err, key=lambda k: (err[k], k[1], k[0]))
+                                 duration_abs_err=dur_err[(d, e)], bout_f1=2 * hit / (n_m + n_r)))
+        e_best = min(count_err, key=lambda k: (count_err[k], k[1], k[0]))[1]
+        d_best = min(deltas, key=lambda d: (round(dur_err[(d, e_best)], 9), d))
+        out[p] = (d_best, e_best)
     return out, pd.DataFrame(rows)
 
 
