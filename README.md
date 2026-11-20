@@ -1,7 +1,7 @@
 # Mobility index from the ceiling FMCW radar
 
 Mobility metrics in three categories, computed from the ceiling FMCW radar and validated against MoCap, on the January 2026 campaign. The goals and plan are in [SCOPE.md](SCOPE.md); what was done per category, and the bottlenecks, are in [docs/category1.md](docs/category1.md), [docs/category2.md](docs/category2.md) and
-[docs/category3.md](docs/category3.md); the angle pass (product 3) in [docs/angle.md](docs/angle.md).
+[docs/category3.md](docs/category3.md); the angle pass (product 3) in [docs/angle.md](docs/angle.md); the calibration strategy (population and personal) in [docs/calibration.md](docs/calibration.md).
 
 | Category | Metrics | Status |
 |---|---|---|

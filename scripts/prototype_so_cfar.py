@@ -21,6 +21,13 @@ Each detects moving cells (|v| >= MIN_SPEED, r >= MIN_RANGE) and counts them per
 scripts/evaluate_category1.py (radar threshold leave-one-subject-out, AUC and F1 per recording vs MoCap active).
 Needs scripts/evaluate_category1.py to have run.
 
+Two risks of an online map are scored on their own, F1 pooled over the epochs (in the evaluation window):
+    in bed       the lying period, from "Lay down on the bed" to "Get up and sit on the edge of the bed" (turns, lying
+                 still, the wearable button included): a person staying in the same cells could be absorbed by the map
+    cold start   convergence: every lane is run a second time, started cold at "Walk towards the chair" (the arm tasks
+                 at the chair follow), and scored on the WARMUP_S after that restart against the same epochs of the
+                 converged run, with the same thresholds (those of the converged run)
+
     python scripts/prototype_so_cfar.py --workers 16
     python scripts/prototype_so_cfar.py --only person_1/scenario_1      # quick check, no scores
 
@@ -39,7 +46,7 @@ from sklearn.metrics import f1_score
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
 from mobility.cli import parallel_map, wide_tables  # noqa: E402
-from mobility.config import CATEGORY1_THRESHOLDS, FPS, category_dir  # noqa: E402
+from mobility.config import CATEGORY1_THRESHOLDS, EPOCH_S, FPS, category_dir  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds  # noqa: E402
 from mobility.radar.cube import load_cube  # noqa: E402
 from mobility.radar.features import MOVING  # noqa: E402
@@ -53,7 +60,9 @@ FIXED_DB = 6                  # margin of the no-CFAR lanes (current ABOVE_FLOOR
 GUARD = (4, 3)                # guard cells on each side: range (4.4 cm), Doppler (4.3 cm/s)
 TRAIN = (8, 8)                # training cells per strip: range, Doppler
 WIDTH = 3                     # strips are WIDTH cells wide across the other axis
-WARMUP_S = 120                # epochs this early in the recording are scored separately (clutter map converging)
+WARMUP_S = 120                # cold start: scored on this long after the restart (clutter map converging)
+RESTART_LABEL = 'walk towards the chair'                                       # cold start here
+BED_SPAN = ('lay down on the bed', 'get up and sit on the edge of the bed')   # lying period: first to last label
 MEAN_TAU_S, MEAN_SLOW = 120, 10
 SOURCES = ['raw', 'mean'] + [f'q{t}' for t in TAUS_S]
 # lanes: (name, source map, CFAR k in dB or None = fixed margin)
@@ -118,13 +127,37 @@ def detections(cube):
     return out
 
 
+def _label_time(labels, text, which='start', after=None):
+    """start or end (epoch s) of the first label with this text (at or after `after`), or None"""
+    lb = labels[labels.label.str.lower() == text]
+    if after is not None:
+        lb = lb[lb.start >= after]
+    return float(lb[which].iloc[0]) if len(lb) else None
+
+
 def epochs(rec, gt_thr):
-    """the evaluation rows of ev.epoch_table for one recording, with the epoch level of every lane"""
+    """the evaluation rows of ev.epoch_table for one recording, with the epoch level of every lane, of every lane
+    started cold at RESTART_LABEL (<lane>_cold), and the in_bed and cold_start subsets"""
     person, scenario = rec.split('/')
     s = load_session(person, scenario)
-    counts = detections(load_cube(person, scenario))
-    return ev.count_epoch_table(s, {name: x for (name, _, _), x in zip(LANES, counts)}, gt_thr[person],
-                                with_label=True)     # with n_cells: the current detector (global floor)
+    cube = load_cube(person, scenario)
+    counts = {name: x for (name, _, _), x in zip(LANES, detections(cube))}
+    restart = _label_time(s.labels, RESTART_LABEL)
+    if restart is not None:
+        r0 = max(int(round((restart - s.t[0]) * FPS)), 0)
+        cold = detections(cube[r0:r0 + (WARMUP_S + 2 * INIT_S) * FPS])
+        for (name, _, _), x in zip(LANES, cold):
+            counts[f'{name}_cold'] = np.full(len(cube), np.nan)
+            counts[f'{name}_cold'][r0:r0 + len(x)] = x
+    df = ev.count_epoch_table(s, counts, gt_thr[person], with_label=True)  # with n_cells: the global floor
+    t = s.t[0] + df.t_s.values                                                # epoch start, epoch s
+    bed0 = _label_time(s.labels, BED_SPAN[0])
+    bed1 = _label_time(s.labels, BED_SPAN[1], 'end', after=bed0) if bed0 is not None else None
+    df['in_bed'] = (bed0 is not None) & (bed1 is not None) & (t + EPOCH_S / 2 >= (bed0 or 0)) & \
+        (t + EPOCH_S / 2 <= (bed1 or 0))
+    df['cold_start'] = (restart is not None) & (t >= (restart or 0) + INIT_S + EPOCH_S) & \
+        (t + EPOCH_S <= (restart or 0) + WARMUP_S)
+    return df
 
 
 def _epochs(args):
@@ -153,14 +186,15 @@ if __name__ == '__main__':
     w = table[table.window]
     print(f'{table.rec.nunique()} recordings, {len(w)} epochs in the evaluation window')
     rows = []
+    print(f'in bed: {w.in_bed.sum()} epochs; cold start: {w.cold_start.sum()} epochs')
     for name, tau, kd in [('n_cells', None, None)] + LANES:
         thr = ev.loso_thresholds(table, name, gt_thr)
         sc = ev.epoch_scores(table, name, thr)
+        cold = f'{name}_cold'
         rows.append(dict(detector=name, tau_s=tau, k_db=kd, auc_median=sc.auc.median(), f1_median=sc.f1.median(),
-                         f1_p10=sc.f1.quantile(0.1),
-                         f1_bed=pooled_f1(w, name, thr, w.label.str.contains('bed', case=False)),
-                         f1_first_2min=pooled_f1(w, name, thr, w.t_s < WARMUP_S),
-                         f1_after_2min=pooled_f1(w, name, thr, w.t_s >= WARMUP_S)))
+                         f1_p10=sc.f1.quantile(0.1), f1_in_bed=pooled_f1(w, name, thr, w.in_bed),
+                         f1_converged=pooled_f1(w, name, thr, w.cold_start),
+                         f1_cold_start=pooled_f1(w, cold, thr, w.cold_start) if cold in w else np.nan))
     res = pd.DataFrame(rows)
     res.to_csv(TABLE, index=False)
     wide_tables()

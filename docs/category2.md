@@ -282,6 +282,27 @@ The current definition and calibration follow from two problems with the earlier
 
 **What remains.** The radar's errors on the new index follow its bout-count errors (correlation 0.88 per recording). Rest time is about the same for both sensors, so every extra or missed radar bout is also an extra or missed interruption of rest. The index will only get better as the bout count does.
 
+**Combined indices** (one-off check on the current bouts; kept for reference, not adopted). With p_end = bout → rest and p_start = rest → bout:
+
+| Fragmentation index | Error | Mean signed error | Radar / no-sensor | MoCap value vs bout count | MoCap value vs 1 / mean bout duration | Radar error vs bout-count error | People with the radar too high |
+|---|---|---|---|---|---|---|---|
+| p_end (the earlier definition, with the current calibration) | 8.0% | +4.0% | 0.50 | 0.60 | 1.00 | 0.58 | 20 of 27 |
+| **p_start (current)** | 12.7% | +1.2% | 0.73 | 0.19 | 0.28 | 0.88 | 14 of 27 |
+| arithmetic mean, (p_end + p_start) / 2 | 8.3% | +2.2% | 0.61 | 0.49 | 0.79 | 0.95 | 17 of 27 |
+| geometric mean, √(p_end · p_start) | 8.4% | +2.2% | 0.60 | 0.50 | 0.80 | 0.97 | 17 of 27 |
+| transitions per second, (bout starts + ends) / valid time | 8.5% | +2.2% | 0.59 | 0.50 | 0.80 | 0.98 | 15 of 27 |
+
+Correlations are across recordings (values) and per recording (errors, in % of MoCap).
+
+- **The combinations are more accurate than p_start** (0.6× the guess instead of 0.73×), but their radar errors are almost exactly the bout-count errors (0.95–0.98), and their values follow the mean duration (0.8).
+- **Every fragmentation index is the number of bouts divided by a time.** On these recordings:
+  - p_end ≈ bouts / time in bouts = 1 / mean bout duration (correlation 0.994);
+  - p_start ≈ bouts / time at rest (0.989);
+  - transitions per second, and the two means, ≈ 2 × bouts / evaluated time, i.e. bouts per minute (0.992).
+
+  The choice is what to divide the bout count by, and the radar's bout-count errors carry through whatever the denominator.
+- **Why p_start is kept.** It is the only version that doesn't duplicate another metric. p_end is the mean duration again. The combinations are bouts per minute: here they differ from the count only because the evaluated time varies between recordings. With fixed observation windows in deployment (for example a full day), they would be the bout count divided by a constant. p_start divides by the time at rest, which varies from day to day, so it stays informative.
+
 ### Per epoch and per bout
 
 | | Value |
@@ -372,6 +393,7 @@ Agreement for other radar thresholds, all people alike, with the MoCap definitio
 | bout figures | 2026-11-18 | `python scripts/plot_bouts.py --only ...` | `output/plots/bouts/` |
 | signed error per person | 2026-11-18 | `python scripts/plot_per_person_category2.py` | `output/plots/per_person/per_person_bouts_bias.png` |
 | fragmentation candidate definitions | 2026-11-03 | one-off check, not in the repository | numbers in [Fragmentation index](#fragmentation-index-definition-and-calibration) |
+| combined fragmentation indices | 2026-11-18 | one-off check, not in the repository | numbers in [Fragmentation index](#fragmentation-index-definition-and-calibration) |
 
 Machine and env: `barabas`, `distrimuse` conda env.
 
@@ -426,7 +448,7 @@ Machine and env: `barabas`, `distrimuse` conda env.
 Still open:
 - **Validating between-person differences:** needs recordings that are not scripted (Bottleneck 1).
 - **Which sensor to trust in bed** (Bottleneck 2).
-- **A combined fragmentation index** using both transition directions (bout → rest and rest → bout), being tried.
+- **Fragmentation index:** combinations of both transition directions were tried and are documented for reference ([Fragmentation index](#fragmentation-index-definition-and-calibration)). They are more accurate but essentially bouts per minute; p_start is kept for now.
 
 ## Reproducing
 

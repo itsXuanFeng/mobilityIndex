@@ -70,7 +70,7 @@ x, z and height of the radar's nearest moving reflector (orange) and the nearest
 
 ## Running it on the campaign
 
-Run on 2026-10-25 18:31 – 2026-10-26 01:28 on `barabas` with the first command below (`--device cpu --threads 8`; both GPUs were busy with other jobs). Result: 156 of 156 recordings, no failures; 1,601,282 frames read (the 26,231 missing frames are those missing from the cube too: person_101/scenario_100 frames 0–26,214, person_23/scenario_5 frames 858–873); 120 frames skipped as damaged, the same as in the cube; 447 M points, 25 GB. Code: commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`).
+Run on 2026-10-25 18:31 – 2026-10-26 01:28 on `barabas` with the first command below (`--device cpu --threads 8`; both GPUs were busy with other jobs). Result: 156 of 156 recordings, no failures; 1,601,282 frames read (the 26,231 missing frames are those missing from the cube too: person_101/scenario_100 frames 0–26,214, person_23/scenario_5 frames 858–873); 120 frames skipped as damaged, the same as in the cube; 447 M points, 25 GB. Code: commit `249d60c` ("category 2 & 3 initial results", 2026-10-26). The refactor in commit `6ea79f9` (2026-11-17) moved the reading into the shared `BatchReader` (`mobility/io/raw.py`) and the noise floor into `mobility/radar/cache.py`, without changing what the pass computes; the pass has not been re-run since.
 
 ```bash
 PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3

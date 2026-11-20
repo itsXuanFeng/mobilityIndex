@@ -2,6 +2,8 @@
 Per-person figures from the evaluation tables:
     scores_figure, energy_error_figure, energy_bias_figure   Category 1 (scripts/plot_per_person.py)
     bouts_bias_figure                                         Category 2 (scripts/plot_per_person_category2.py)
+    setups_bias_figure                                        personal calibration, setups A-C
+                                                              (scripts/plot_per_person_personal.py)
 Signed errors: bars are the person's mean (red: radar too high, blue: too low), dots one recording each. All on one
 side = a systematic error for that person.
 """
@@ -118,4 +120,41 @@ def bouts_bias_figure(errors, persons, path, panels=BOUT_PANELS):
     axes[0].legend(ncol=3, loc='lower right', bbox_to_anchor=(1, 1.0), borderaxespad=0.2)
     fig.suptitle('Category 2: signed error per person (148 recordings, 27 people)', x=0.01, ha='left',
                  fontsize=12, fontweight='bold')
+    fig.savefig(path, dpi=160)
+
+
+SETUP_LABELS = {'A': 'A: LOSO', 'B': 'B: LOSO + clip', 'C': 'C: LOSO + other recordings + clip'}
+
+
+def setups_bias_figure(errors, persons, panels, path, title):
+    """personal calibration (scripts/evaluate_personal_calibration.py): one panel per metric, each person's mean signed
+    error in % of MoCap under setups A, B and C side by side. errors: per recording, setup and metric, person and
+    err = 100 x (radar - MoCap) / MoCap; persons in plotting order; panels: [(metric, title)]. One y-scale for all
+    panels."""
+    e = errors[errors.metric.isin([k for k, _ in panels])]
+    setups = [s for s in SETUP_LABELS if s in set(e.setup)]
+    mean = e.groupby(['metric', 'setup', 'person']).err.mean()
+    x, w = np.arange(len(persons)), 0.8 / len(setups)
+    style.apply()
+    lim = np.ceil(1.1 * mean.abs().max() / 5) * 5
+    fig, axes = plt.subplots(len(panels), 1, figsize=(14, 2.6 * len(panels) + 0.8), sharex=True,
+                             constrained_layout=True, squeeze=False)
+    axes = axes[:, 0]
+    for ax, (k, name) in zip(axes, panels):
+        stats = []
+        for i, s in enumerate(setups):
+            ax.bar(x + (i - (len(setups) - 1) / 2) * w, mean[k, s].reindex(persons).values, w,
+                   color=style.SLOTS[i], edgecolor=style.SURFACE, linewidth=0.6, label=SETUP_LABELS[s])
+            g = e[(e.metric == k) & (e.setup == s)].err
+            stats.append(f'{s} {g.abs().mean():.1f}% ({g.mean():+.1f}%)')
+        ax.axhline(0, color=style.INK_2, lw=1)
+        ax.set_ylim(-lim, lim)
+        ax.yaxis.set_major_formatter(lambda v, _: f'{v:+.0f}%' if v else '0%')
+        ax.set_ylabel('radar − MoCap\n(% of MoCap)')
+        ax.grid(axis='x', visible=False)
+        ax.set_title(f'{name}: mean absolute error (mean signed error) per recording: ' + ', '.join(stats), loc='left')
+    axes[-1].set_xticks(x, _short(persons))
+    axes[-1].set_xlim(-0.7, len(persons) - 0.3)
+    fig.suptitle(title, x=0.01, ha='left', fontsize=12, fontweight='bold')
+    fig.legend(*axes[0].get_legend_handles_labels(), ncol=len(setups), loc='outside lower center')
     fig.savefig(path, dpi=160)

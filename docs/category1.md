@@ -281,7 +281,7 @@ Active and inactive time are complementary: both sides use the same valid epochs
 ![Energy error per person](../output/plots/per_person/per_person_energy_error.png)
 ![Signed energy error per person](../output/plots/per_person/per_person_energy_bias.png)
 
-In the signed plot, the bars show each person's mean error (red: radar too high, blue: too low), and the dots show their single recordings. The mean over all recordings is 0 by construction, since the conversion factor matches the totals.
+In the signed plot, the bars show each person's mean error (red: radar too high, blue: too low), and the dots show their single recordings. The mean over all recordings is close to 0 (bias −0.0%), but not by construction: each person's conversion factor is fitted on the *other* persons' totals, so it doesn't match the totals of all recordings exactly.
 
 Active and inactive time vary between persons in a way that is partly systematic. The mean active-time error per person ranges from −0.39 to +0.38 min, so some people come out consistently too active (person_6, person_15, person_24) or too inactive (person_26).
 
@@ -296,7 +296,7 @@ Active and inactive time vary between persons in a way that is partly systematic
 - **`n_cells` is the best feature,** also in the worst recordings, so it is the active/inactive feature.
 - **Moving power (`p_sub`) is clearly worse,** because of its distance dependence (below).
 - **The lowest F1 (`n_cells`)** is 0.83–0.84, in person_15/scenario_5, person_6 (scenarios 1, 2 and 3), person_25/scenario_1, person_12/scenario_5, person_26/scenario_6 and person_15/scenario_4.
-- **Per person** (each person's epochs pooled): AUC 0.94–0.99, F1 0.84–0.93 for the active calls and 0.89–0.95 for the inactive ones. F1 is higher for the inactive class because inactive epochs are the majority (about 60%).
+- **Per person** (each person's epochs pooled): AUC 0.94–0.98, F1 0.84–0.93 for the active calls and 0.89–0.95 for the inactive ones. F1 is higher for the inactive class because inactive epochs are the majority (about 60%).
 
 ![AUC and F1 per person](../output/plots/per_person/per_person_scores.png)
 
@@ -304,22 +304,27 @@ The development subset gave the same picture (AUC 0.96, F1 0.88–0.89 on 6 reco
 
 ### Online detector
 
-The online detector (§2) was scored like `n_cells`: leave-person-out radar threshold, AUC and F1 per recording against MoCap active, on the 148 recordings. Two subsets show its specific risks:
-- **in bed:** a person moving in the same cells could be taken into the clutter map;
-- **the first 2 min:** the clutter map is still converging.
+The online detector (§2) was scored like `n_cells`: leave-person-out radar threshold, AUC and F1 per recording against MoCap active, on the 148 recordings. Two subsets test its specific risks, with F1 pooled over the epochs in the evaluation window:
+- **In bed:** a person staying in the same cells could be taken into the clutter map. The subset is the lying period, from "Lay down on the bed" to "Get up and sit on the edge of the bed", with the turns, lying still and the wearable button included (14,546 epochs).
+- **Cold start:** the clutter map needs time to converge. Every variant is run a second time, started cold at "Walk towards the chair", so the arm tasks at the chair follow. Both runs are then scored on the same 2 min after that restart, with the same thresholds (17,067 epochs). The table gives F1 converged → cold.
 
-On those two subsets, F1 is pooled over the epochs.
-
-| Detector | AUC | F1 | F1, 10th percentile | F1 in bed | F1, first 2 min |
+| Detector | AUC | F1 | F1, 10th percentile | F1 in bed | F1 after a cold start |
 |---|---|---|---|---|---|
-| global 20th percentile + 6 dB (`n_cells`, current) | 0.971 | 0.907 | 0.862 | 0.924 | 0.950 |
-| **running 20th percentile (τ 2 min) + SO-CFAR 4.5 dB (chosen)** | **0.972** | **0.910** | **0.859** | **0.925** | **0.953** |
-| running 20th percentile (τ 30 s) + fixed 6 dB, no CFAR | 0.972 | 0.909 | 0.861 | 0.924 | 0.953 |
-| SO-CFAR 4.5 dB alone, no clutter map | 0.972 | 0.908 | 0.864 | 0.925 | 0.948 |
-| running mean (τ 2 min) + SO-CFAR 6 dB | 0.794 | 0.623 | 0.493 | 0.804 | 0.622 |
+| global 20th percentile + 6 dB (`n_cells`, current) | 0.971 | 0.907 | 0.862 | 0.863 | (not online) |
+| **running 20th percentile (τ 2 min) + SO-CFAR 4.5 dB (chosen)** | **0.972** | **0.910** | **0.861** | **0.865** | **0.846 → 0.835** |
+| running 20th percentile (τ 30 s) + fixed 6 dB, no CFAR | 0.972 | 0.909 | 0.861 | 0.865 | 0.846 → 0.847 |
+| running 20th percentile (τ 10 min) + SO-CFAR 4.5 dB | 0.971 | 0.908 | 0.869 | 0.865 | 0.846 → 0.765 |
+| SO-CFAR 4.5 dB alone, no clutter map | 0.972 | 0.908 | 0.866 | 0.864 | 0.849 → 0.847 |
+| running mean (τ 2 min) + SO-CFAR 6 dB | 0.794 | 0.617 | 0.488 | 0.604 | 0.625 → 0.600 |
 
-- **Online costs nothing:** every running-percentile and SO-CFAR-only variant scores AUC 0.969–0.973 and F1 0.899–0.910. That holds for every time constant (30 s, 2 min, 10 min) and every CFAR factor (3, 4.5, 6 dB).
-- **No warm-up penalty and no absorption in bed:** both subsets score as well as with the global floor.
+- **Online costs nothing once converged:** every running-percentile and SO-CFAR-only variant scores AUC 0.969–0.973 and F1 0.899–0.910. That holds for every time constant (30 s, 2 min, 10 min) and every CFAR factor (3, 4.5, 6 dB).
+- **No absorption in bed:** over the lying period, every running-percentile and SO-CFAR-only variant scores F1 0.845–0.868, against 0.863 for the global floor (0.865 for the chosen design).
+- **A cold start costs little with τ = 2 min, but a lot with a slower map.** In the 2 min after a cold start:
+  - the chosen design drops by 0.011 in F1 (0.846 → 0.835);
+  - with τ = 30 s, the drop is at most 0.012 (k = 3 dB), and 0.003 at k = 4.5 dB;
+  - with τ = 10 min, F1 drops to 0.765, and to 0.626 with k = 3 dB. A map started from only 2 s of data is noisy, and a slow map keeps that noise for minutes.
+
+  The variants with a fixed 6 dB margin barely change (0.843–0.847), and SO-CFAR alone keeps no state at all. A cold start happens once per deployment, so with τ = 2 min this is a short, small cost.
 - **The running mean fails** for the reason in §2: the person's echoes raise it.
 - **On these recordings, the clutter map adds nothing measurable:** SO-CFAR on the range-Doppler map alone scores the same. The per-frame chirp-mean subtraction already removes static reflections, and the lab has no persistent moving clutter (fans, curtains) for the map to learn. The clutter map is kept for deployment, where such clutter is expected.
 - **The design is chosen on its properties, not on these scores.** The variants differ by at most 0.004, and that difference was measured on the same data a choice would be judged on.
@@ -398,10 +403,10 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 | radar pass, all January recordings | 2026-10-22, 15:32–22:37 | `CUDA_VISIBLE_DEVICES=0 python scripts/radar_pass.py` | `output/<person>/<scenario>/rd12_db.npy`, `pass_info.json`; log `output/radar_pass_january.log` |
 | MoCap active threshold | 2026-10-22 | `python scripts/calibrate_mocap_threshold.py` | `output/groundtruth/` |
 | angle pass (points, for the energy) | 2026-10-25 18:31 – 2026-10-26 01:28 | `python scripts/angle_pass.py --device cpu --threads 8` | `output/<person>/<scenario>/points.npz`; see [angle.md](angle.md) |
-| Category 1 evaluation | 2026-11-02, after adding the horizontal speed to the point-cloud energy (point-cloud energy and MoCap tracking-jump filter: 2026-10-29) | `python scripts/evaluate_category1.py --workers 16` | `output/category1/`; log `output/category1_full.log` |
+| Category 1 evaluation | 2026-11-02, after adding the horizontal speed to the point-cloud energy (point-cloud energy and MoCap tracking-jump filter: 2026-10-29); re-run 2026-11-18 on commit `f78b16c`, all tables identical | `python scripts/evaluate_category1.py --workers 16` | `output/category1/`; log `output/category1_full.log` |
 | per-person plots | 2026-11-02 | `python scripts/plot_per_person.py` | `output/plots/per_person/`: scores, energy error, signed energy error |
 | global-floor sensitivity | 2026-10-27 | `python scripts/sensitivity_floor.py --workers 16` | `output/category1/floor_sensitivity.csv`, `output/plots/sensitivity/floor_sensitivity.png` |
-| online detector (prototype) | 2026-10-27 | `python scripts/prototype_so_cfar.py --workers 16` | `output/category1/so_cfar_prototype.csv`; log `output/category1/so_cfar_prototype.log` |
+| online detector (prototype) | 2026-10-27; re-run 2026-11-18 with the in-bed and cold-start subsets redefined (and the MoCap tracking-jump filter, which the first run predates) | `python scripts/prototype_so_cfar.py --workers 16` | `output/category1/so_cfar_prototype.csv`; log `output/category1/so_cfar_prototype.log` |
 
 **Where the radar pass is written.** `output/` is `/cw/dtaiexp/2026-XuanFeng/mobilityIndex/output/` (git-ignored; `MOBILITY_OUTPUT` overrides it). Each recording has its own folder:
 
@@ -427,10 +432,19 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 | time | 7.0 h in total, median 2.6 min per recording, about 95% of it waiting for data |
 | size | 51 GB |
 
-**Code version.** The earlier runs used commit `ac098d0` ("add cat 1 full-campaign results", 2026-10-23) and commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`), which also holds the angle pass. The 2026-10-29 and 2026-11-02 re-runs add uncommitted changes: the point-cloud energy with the horizontal speed (`mobility/radar/angle.py`, `mobility/states.py`, `mobility/session.py`), the energy error and per-person table (`mobility/evaluation.py`, `scripts/evaluate_category1.py`, `scripts/plot_per_person.py`), the MoCap tracking-jump filter (`mobility/config.py`, `mobility/states.py`) and the removal of `p_r4`. Commit them to pin that version. Commit `ac098d0` includes:
-- damaged-frame masking and `pass_info.json` (`mobility/radar/cube.py`);
-- the label-calibrated MoCap threshold (`mobility/labels.py`, `mobility/groundtruth.py`, `scripts/calibrate_mocap_threshold.py`);
-- leave-one-subject-out radar thresholds and the alignment quality check (`mobility/evaluation.py`, `scripts/evaluate_category1.py`).
+**Code version.** The results come from commit `f78b16c` (2026-11-17, on `origin/master`). The Category 1 evaluation was re-run on it on 2026-11-18 and reproduced every table of the 2026-11-02 run exactly.
+
+How the Category 1 code got there:
+
+| Commit | Date | Category 1 changes |
+|---|---|---|
+| `ac098d0` | 2026-10-23 | damaged-frame masking and `pass_info.json`; label-calibrated MoCap threshold; leave-one-subject-out radar thresholds; alignment quality check |
+| `249d60c` | 2026-10-26 | the angle pass |
+| `ae6077f` | 2026-11-02 | point-cloud energy (`e_body`); MoCap tracking-jump filter; energy error after conversion and per-person table; `p_r4` removed |
+| `21f49c4` | 2026-11-04 | horizontal speed (`v_horiz`, `e_move`). The 2026-11-02 evaluation ran on this code before it was committed. |
+| `6ea79f9`, `f78b16c` | 2026-11-17 | refactor (evaluation package, script helpers, shared plot modules); results unchanged |
+
+The online-detector subsets were redefined after `f78b16c`, in `scripts/prototype_so_cfar.py`, and its results re-run on 2026-11-18 (see [Online detector](#online-detector)). Earlier, "in bed" was any label containing "bed": it included walking to the bed and left out lying still. The warm-up subset was the first 2 min of the recording, mostly before MoCap starts and then walking in, so it didn't test convergence.
 
 **Tables in `output/category1/`:**
 
@@ -445,7 +459,7 @@ The full-campaign results above come from these runs, on the machine `barabas` (
 | `per_label.csv` | per scripted activity: MoCap and radar active share, coverage, distance |
 | `distance.csv` | distance dependence of each feature |
 | `floor_sensitivity.csv` | per floor percentile and margin: AUC and F1 of `n_cells` |
-| `so_cfar_prototype.csv` | per online-detector variant: AUC, F1, F1 in bed and in the first 2 min |
+| `so_cfar_prototype.csv` | per online-detector variant: AUC, F1, F1 in bed, F1 converged and after a cold start |
 
 ## Bottlenecks
 

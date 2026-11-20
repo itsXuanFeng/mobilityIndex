@@ -373,17 +373,17 @@ The worst recording (F1 0.32: 4 of 10 matched, 15 radar transitions). Most extra
 |---|---|---|---|
 | MoCap signals for posture (pelvis, knees, trunk, joint radial speed) | 2026-10-23, 40 s | first load after the code change (any script) | `output/<person>/<scenario>/mocap_50hz.npz` |
 | radar feature `v_peak` | 2026-10-23, 70 s | first `load_session` after the code change | `output/<person>/<scenario>/features.npz` |
-| posture rule calibration | 2026-10-23, 17:48–17:50 | `python scripts/calibrate_posture.py --workers 16` | `output/groundtruth/posture_*.csv`; log `output/calibrate_posture.log` |
+| posture rule calibration | 2026-10-23, 17:48–17:50; re-run 2026-11-18, 09:07–09:08, with commit `6ea79f9`: identical tables | `python scripts/calibrate_posture.py --workers 16` | `output/groundtruth/posture_*.csv`; log `output/calibrate_posture.log` |
 | angle pass | 2026-10-25 18:31 – 2026-10-26 01:28 | `python scripts/angle_pass.py --device cpu --threads 8` | `output/<person>/<scenario>/points.npz` ([angle.md](angle.md)) |
 | per-frame angle features | 2026-10-26, about 1 min (16 workers) | first `load_session` after the code change | `output/<person>/<scenario>/angle_features.npz` (60 MB in all) |
-| Category 3 evaluation | 2026-10-26, rerun with the peak-speed quantile (the angle features recomputed once to add `v_q900` … `v_q995`) | `python scripts/evaluate_category3.py --workers 16` | `output/category3/`; log `output/category3_full.log` |
+| Category 3 evaluation | 2026-10-26, with the peak-speed quantile (the angle features recomputed once to add `v_q900` … `v_q995`); re-run 2026-11-02 after the Category 1 update (the same numbers, up to the second decimal of the posture-time errors in %); re-run 2026-11-18, 09:08–09:16, with commit `6ea79f9`: every table identical to 2026-11-02 | `python scripts/evaluate_category3.py --workers 16` | `output/category3/`; log `output/category3_full.log` |
 | transition figures | 2026-10-26 | `python scripts/plot_transitions.py --only ...` | `output/plots/transitions/` |
 
-Machine and env: `barabas`, `distrimuse` conda env. The evaluation spends most of its time calibrating the height rule over its grid (5 off-axis corrections × 7 holds, per left-out person) and about 3 min training the two classifiers for comparison.
+Machine and env: `barabas`, `distrimuse` conda env. The evaluation takes about 8 min: most of it calibrating the height rule over its grid (5 off-axis corrections × 7 holds, per left-out person), about 3 min training the two classifiers for comparison.
 
 **Inputs and code version.**
 - **Inputs:** the Category 1 recordings and thresholds (`output/category1/thresholds.csv`), the MoCap posture rule (`output/groundtruth/posture_rule.csv`), and the angle-pass points.
-- **Code:** commit `249d60c` ("category 2 & 3 initial results", 2026-10-26, on `origin/master`) holds the code of these runs, including the angle pass.
+- **Code:** commit `6ea79f9` (2026-11-17, "Refactor: evaluation package, script helpers, shared plot modules"). The Category 3 code came in commit `249d60c` (2026-10-26), with the angle pass. The refactor moved it (`calibrate_height_rule`, `calibrate_peak` and the event scoring now in `mobility/evaluation/category3.py`) without changing results: re-running the posture calibration and the Category 3 evaluation with it on 2026-11-18 reproduces every output table of the 2026-11-02 run exactly.
 - **Effect on Categories 1–2:** none; the new MoCap signals and radar features are additions.
 
 **Tables in `output/groundtruth/`:**
@@ -453,7 +453,7 @@ Still open:
 ```bash
 PY=/cw/dtaiexp/NoCsBack/2026-Xuan/miniforge3/envs/distrimuse/bin/python3
 # after the Category 1 runs (radar pass, calibrate_mocap_threshold.py, evaluate_category1.py) and the angle pass
-$PY scripts/calibrate_posture.py --workers 16                      # ~3 min, MoCap + labels only
-$PY scripts/evaluate_category3.py --workers 16                     # height rule + comparisons; computes the angle features once
+$PY scripts/calibrate_posture.py --workers 16                      # ~2 min, MoCap + labels only
+$PY scripts/evaluate_category3.py --workers 16                     # ~8 min: height rule + comparisons; computes the angle features once
 $PY scripts/plot_transitions.py --only person_10/scenario_2 person_26/scenario_6
 ```
