@@ -11,7 +11,7 @@ RADAR_YAW_DEG, RADAR_MIRROR), for both direction estimators, then reports, with 
 
     python scripts/fit_radar_orientation.py --only person_1/scenario_1 person_10/scenario_2
 
-Writes OUTPUT_ROOT/plots/angle/<person>_<scenario>_angle.png: x, z and height over time, radar vs MoCap, with the
+Writes <person>_<scenario>_angle.png to its run folder: x, z and height over time, radar vs MoCap, with the
 phase estimator and the orientation fitted on all the recordings given.
 """
 import argparse
@@ -24,10 +24,10 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.align import FIT_JOINTS, fit_radar_orientation  # noqa: E402
 from mobility.config import RADAR_XYZ  # noqa: E402
+from mobility.experiment import add_run_args, run  # noqa: E402
 from mobility.groundtruth import joint_kinematics  # noqa: E402
 from mobility.io.mocap import load_track  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
-from mobility.config import PLOTS_DIR  # noqa: E402
 from mobility.plots.angle import angle_figure  # noqa: E402
 from mobility.radar.angle import nearest_reflector, to_room  # noqa: E402
 from mobility.radar.cache import recording_noise_floor  # noqa: E402
@@ -77,36 +77,38 @@ if __name__ == '__main__':
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO', required=True)
     ap.add_argument('--max-range-diff', type=float, default=0.15, help='m: radar and MoCap ranges must agree')
     ap.add_argument('--min-joint-speed', type=float, default=0.3, help='m/s, fastest joint, to use a frame')
+    add_run_args(ap)
     args = ap.parse_args()
-    recs = [parse_recording(r) for r in args.only if os.path.exists(points_path(*parse_recording(r)))]
-    df = pd.concat([frames(r, args.max_range_diff, args.min_joint_speed) for r in recs], ignore_index=True)
-    print(f'{len(df)} frames from {len(recs)} recordings')
-    target = np.c_[df.jx, df.jz] / df.jd.values[:, None]
-    fits = {}
-    for method in METHODS:
-        fits[method] = fit_radar_orientation(np.c_[df[f'u_{method}'], df[f'v_{method}']], target)
-        print(f'{method:6s} RADAR_YAW_DEG = {fits[method]["yaw_deg"]}, RADAR_MIRROR = {fits[method]["mirror"]}: '
-              f'median direction error {fits[method]["median_err"]:.3f}')
-    for method in METHODS:
-        e = errors(df, method, fits[method]['yaw_deg'], fits[method]['mirror'])
-        print(f'\n{method}: median horizontal error {100 * e.horizontal.median():.0f} cm; median |height error| '
-              f'from the angle {100 * e.height_angle.abs().median():.0f} cm (bias {100 * e.height_angle.median():+.0f}),'
-              f' from the range alone {100 * e.height_range.abs().median():.0f} cm '
-              f'(bias {100 * e.height_range.median():+.0f})')
-        by = e.groupby(pd.cut(e.offaxis, [0, 0.5, 1, 1.5, 2, 3, 5])).agg(
-            frames=('horizontal', 'size'), horizontal_cm=('horizontal', lambda x: 100 * x.median()),
-            height_angle_cm=('height_angle', lambda x: 100 * x.abs().median()),
-            height_range_cm=('height_range', lambda x: 100 * x.abs().median()))
-        print(f'by distance of the joint from the radar axis (m), medians:\n{by.round(0).to_string()}')
-        per = e.groupby(df.rec.values).agg(frames=('horizontal', 'size'),
-                                           horizontal_cm=('horizontal', lambda x: 100 * x.median()))
-        print(f'per recording:\n{per.round(0).to_string()}')
-    best = 'phase'                       # the default of mobility.radar.angle.localise
-    out = os.path.join(PLOTS_DIR, 'angle')
-    os.makedirs(out, exist_ok=True)
-    e = errors(df, best, fits[best]['yaw_deg'], fits[best]['mirror'])
-    for rec, g in df.groupby('rec'):
-        path = os.path.join(out, rec.replace('/', '_') + '_angle.png')
-        angle_figure(g, e.loc[g.index], path, f'{rec}: angle check, {best}, yaw {fits[best]["yaw_deg"]} deg, '
-                                              f'mirror {fits[best]["mirror"]}')
-        print(path)
+    with run('radar_orientation', args, partial=False) as run_dir:
+        recs = [parse_recording(r) for r in args.only if os.path.exists(points_path(*parse_recording(r)))]
+        df = pd.concat([frames(r, args.max_range_diff, args.min_joint_speed) for r in recs], ignore_index=True)
+        print(f'{len(df)} frames from {len(recs)} recordings')
+        target = np.c_[df.jx, df.jz] / df.jd.values[:, None]
+        fits = {}
+        for method in METHODS:
+            fits[method] = fit_radar_orientation(np.c_[df[f'u_{method}'], df[f'v_{method}']], target)
+            print(f'{method:6s} RADAR_YAW_DEG = {fits[method]["yaw_deg"]}, RADAR_MIRROR = {fits[method]["mirror"]}: '
+                  f'median direction error {fits[method]["median_err"]:.3f}')
+        for method in METHODS:
+            e = errors(df, method, fits[method]['yaw_deg'], fits[method]['mirror'])
+            print(f'\n{method}: median horizontal error {100 * e.horizontal.median():.0f} cm; median |height error| '
+                  f'from the angle {100 * e.height_angle.abs().median():.0f} cm '
+                  f'(bias {100 * e.height_angle.median():+.0f}),'
+                  f' from the range alone {100 * e.height_range.abs().median():.0f} cm '
+                  f'(bias {100 * e.height_range.median():+.0f})')
+            by = e.groupby(pd.cut(e.offaxis, [0, 0.5, 1, 1.5, 2, 3, 5])).agg(
+                frames=('horizontal', 'size'), horizontal_cm=('horizontal', lambda x: 100 * x.median()),
+                height_angle_cm=('height_angle', lambda x: 100 * x.abs().median()),
+                height_range_cm=('height_range', lambda x: 100 * x.abs().median()))
+            print(f'by distance of the joint from the radar axis (m), medians:\n{by.round(0).to_string()}')
+            per = e.groupby(df.rec.values).agg(frames=('horizontal', 'size'),
+                                               horizontal_cm=('horizontal', lambda x: 100 * x.median()))
+            print(f'per recording:\n{per.round(0).to_string()}')
+        best = 'phase'                       # the default of mobility.radar.angle.localise
+        out = run_dir
+        e = errors(df, best, fits[best]['yaw_deg'], fits[best]['mirror'])
+        for rec, g in df.groupby('rec'):
+            path = os.path.join(out, rec.replace('/', '_') + '_angle.png')
+            angle_figure(g, e.loc[g.index], path, f'{rec}: angle check, {best}, yaw {fits[best]["yaw_deg"]} deg, '
+                                                  f'mirror {fits[best]["mirror"]}')
+            print(path)

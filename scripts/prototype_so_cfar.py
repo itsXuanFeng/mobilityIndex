@@ -31,7 +31,7 @@ Two risks of an online map are scored on their own, F1 pooled over the epochs (i
     python scripts/prototype_so_cfar.py --workers 16
     python scripts/prototype_so_cfar.py --only person_1/scenario_1      # quick check, no scores
 
-Writes OUTPUT_ROOT/category1/so_cfar_prototype.csv.
+Writes so_cfar_prototype.csv to its run folder, output/experiments/so_cfar_<time>/.
 """
 import argparse
 import os
@@ -46,7 +46,8 @@ from sklearn.metrics import f1_score
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
 from mobility.cli import parallel_map, wide_tables  # noqa: E402
-from mobility.config import CATEGORY1_THRESHOLDS, EPOCH_S, FPS, category_dir  # noqa: E402
+from mobility.config import EPOCH_S, FPS  # noqa: E402
+from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds  # noqa: E402
 from mobility.radar.cube import load_cube  # noqa: E402
 from mobility.radar.features import MOVING  # noqa: E402
@@ -68,7 +69,6 @@ SOURCES = ['raw', 'mean'] + [f'q{t}' for t in TAUS_S]
 # lanes: (name, source map, CFAR k in dB or None = fixed margin)
 LANES = ([(f'q{t}_so{k:g}', f'q{t}', k) for t in TAUS_S for k in K_DB] + [(f'q{t}_fixed6', f'q{t}', None) for t in TAUS_S]
          + [(f'raw_so{k:g}', 'raw', k) for k in K_DB] + [('mean120_so6', 'mean', 6)])
-TABLE = os.path.join(category_dir(1), 'so_cfar_prototype.csv')
 
 
 def strips(Z, axis, guard, n, mode):
@@ -173,29 +173,31 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workers', type=int, default=16)
     ap.add_argument('--only', metavar='PERSON/SCENARIO', help='time one recording, no scores')
+    add_run_args(ap)
     args = ap.parse_args()
-    gt_thr = active_speed_thresholds()
-    if args.only:
-        t0 = time.time()
-        d = epochs(args.only, gt_thr)
-        print(f'{args.only}: {len(d)} epochs in {time.time() - t0:.0f} s')
-        print(d[[c for c, _, _ in LANES] + ['n_cells']].describe().round(2).to_string())
-        sys.exit()
-    recs = pd.read_csv(CATEGORY1_THRESHOLDS).rec.tolist()   # evaluated ones
-    table = pd.concat(parallel_map(_epochs, [(r, gt_thr) for r in recs], args.workers), ignore_index=True)
-    w = table[table.window]
-    print(f'{table.rec.nunique()} recordings, {len(w)} epochs in the evaluation window')
-    rows = []
-    print(f'in bed: {w.in_bed.sum()} epochs; cold start: {w.cold_start.sum()} epochs')
-    for name, tau, kd in [('n_cells', None, None)] + LANES:
-        thr = ev.loso_thresholds(table, name, gt_thr)
-        sc = ev.epoch_scores(table, name, thr)
-        cold = f'{name}_cold'
-        rows.append(dict(detector=name, tau_s=tau, k_db=kd, auc_median=sc.auc.median(), f1_median=sc.f1.median(),
-                         f1_p10=sc.f1.quantile(0.1), f1_in_bed=pooled_f1(w, name, thr, w.in_bed),
-                         f1_converged=pooled_f1(w, name, thr, w.cold_start),
-                         f1_cold_start=pooled_f1(w, cold, thr, w.cold_start) if cold in w else np.nan))
-    res = pd.DataFrame(rows)
-    res.to_csv(TABLE, index=False)
-    wide_tables()
-    print(res.round(3).to_string(index=False))
+    with run('so_cfar', args, partial=bool(args.only)) as run_dir:
+        gt_thr = active_speed_thresholds()
+        if args.only:
+            t0 = time.time()
+            d = epochs(args.only, gt_thr)
+            print(f'{args.only}: {len(d)} epochs in {time.time() - t0:.0f} s')
+            print(d[[c for c, _, _ in LANES] + ['n_cells']].describe().round(2).to_string())
+            sys.exit()
+        recs = pd.read_csv(latest('category1', 'thresholds.csv')).rec.tolist()   # evaluated ones
+        table = pd.concat(parallel_map(_epochs, [(r, gt_thr) for r in recs], args.workers), ignore_index=True)
+        w = table[table.window]
+        print(f'{table.rec.nunique()} recordings, {len(w)} epochs in the evaluation window')
+        rows = []
+        print(f'in bed: {w.in_bed.sum()} epochs; cold start: {w.cold_start.sum()} epochs')
+        for name, tau, kd in [('n_cells', None, None)] + LANES:
+            thr = ev.loso_thresholds(table, name, gt_thr)
+            sc = ev.epoch_scores(table, name, thr)
+            cold = f'{name}_cold'
+            rows.append(dict(detector=name, tau_s=tau, k_db=kd, auc_median=sc.auc.median(), f1_median=sc.f1.median(),
+                             f1_p10=sc.f1.quantile(0.1), f1_in_bed=pooled_f1(w, name, thr, w.in_bed),
+                             f1_converged=pooled_f1(w, name, thr, w.cold_start),
+                             f1_cold_start=pooled_f1(w, cold, thr, w.cold_start) if cold in w else np.nan))
+        res = pd.DataFrame(rows)
+        res.to_csv(os.path.join(run_dir, 'so_cfar_prototype.csv'), index=False)
+        wide_tables()
+        print(res.round(3).to_string(index=False))

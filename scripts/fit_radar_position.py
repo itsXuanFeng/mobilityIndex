@@ -14,6 +14,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.align import FIT_JOINTS, fit_radar_position  # noqa: E402
 from mobility.config import RADAR_XYZ  # noqa: E402
+from mobility.experiment import add_run_args, run  # noqa: E402
 from mobility.groundtruth import joint_kinematics  # noqa: E402
 from mobility.io.mocap import load_track  # noqa: E402
 from mobility.cli import recordings  # noqa: E402
@@ -24,23 +25,26 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     ap.add_argument('--min-joint-speed', type=float, default=0.3, help='m/s, fastest joint, to use a frame')
+    add_run_args(ap)
     args = ap.parse_args()
-    ranges, joints = [], []
-    for p, s in recordings(args.only):
-        if not os.path.exists(cube_path(p, s)):
-            continue
-        ses = load_session(p, s)
-        t, pos = load_track(ses.alignment['track'], FIT_JOINTS)
-        grid, pj, v = joint_kinematics(t, pos)
-        k = np.clip(np.searchsorted(grid, ses.t), 0, len(grid) - 1)
-        speed = np.linalg.norm(v[k], axis=-1).max(1)
-        use = ses.masks['has_mocap'] & ~np.isnan(ses.radar['r_near']) & (speed > args.min_joint_speed)
-        ranges.append(ses.radar['r_near'][use])
-        joints.append(pj[k[use]])
-        print(f'{ses.name}: {use.sum()} frames')
-    ranges, joints = np.concatenate(ranges), np.concatenate(joints)
-    fit = fit_radar_position(ranges, joints)
-    now = np.median(np.abs(np.linalg.norm(joints - np.asarray(RADAR_XYZ), axis=-1).min(1) - ranges))
-    print(f'fitted RADAR_XYZ = ({fit["xyz"][0]:.2f}, {fit["xyz"][1]:.2f}, {fit["xyz"][2]:.2f}): median |range error| '
-          f'{100 * fit["median_abs_err"]:.1f} cm, bias {100 * fit["bias"]:+.1f} cm, {len(ranges)} frames')
-    print(f'current RADAR_XYZ = {RADAR_XYZ}: median |range error| {100 * now:.1f} cm')
+    with run('radar_position', args, partial=False) as run_dir:
+        ranges, joints = [], []
+        for p, s in recordings(args.only):
+            if not os.path.exists(cube_path(p, s)):
+                continue
+            ses = load_session(p, s)
+            t, pos = load_track(ses.alignment['track'], FIT_JOINTS)
+            grid, pj, v = joint_kinematics(t, pos)
+            k = np.clip(np.searchsorted(grid, ses.t), 0, len(grid) - 1)
+            speed = np.linalg.norm(v[k], axis=-1).max(1)
+            use = ses.masks['has_mocap'] & ~np.isnan(ses.radar['r_near']) & (speed > args.min_joint_speed)
+            ranges.append(ses.radar['r_near'][use])
+            joints.append(pj[k[use]])
+            print(f'{ses.name}: {use.sum()} frames')
+        ranges, joints = np.concatenate(ranges), np.concatenate(joints)
+        fit = fit_radar_position(ranges, joints)
+        now = np.median(np.abs(np.linalg.norm(joints - np.asarray(RADAR_XYZ), axis=-1).min(1) - ranges))
+        print(f'fitted RADAR_XYZ = ({fit["xyz"][0]:.2f}, {fit["xyz"][1]:.2f}, {fit["xyz"][2]:.2f}): '
+              f'median |range error| '
+              f'{100 * fit["median_abs_err"]:.1f} cm, bias {100 * fit["bias"]:+.1f} cm, {len(ranges)} frames')
+        print(f'current RADAR_XYZ = {RADAR_XYZ}: median |range error| {100 * now:.1f} cm')

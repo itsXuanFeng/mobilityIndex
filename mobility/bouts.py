@@ -19,17 +19,15 @@ bouts, also leaving the person out (mobility.evaluation.loso_radar_bout_levels).
 
 Radar and MoCap bouts are compared one to one (match_bouts), by intersection over union.
 """
-import os
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from .config import GROUNDTRUTH_DIR
 from .labels import ACTIVE, INACTIVE
 from .utils import read_calibration, runs
 
-BOUT_RULE_FILE = os.path.join(GROUNDTRUTH_DIR, 'bout_rule.csv')
+BOUT_RULE_FILE = 'bout_rule.csv'   # in the bout_rule run (scripts/calibrate_bout_rule.py)
 GRID_GAP = range(0, 4)        # max_gap candidates, epochs
 GRID_MIN_BOUT = range(1, 5)   # min_bout candidates, epochs
 GRID_EXIT = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3)   # MoCap exit threshold / entry threshold; 1 = no hysteresis
@@ -186,15 +184,16 @@ def calibrate_bout_rule(confusion, exclude_person=None, tolerance=LABEL_TOLERANC
     return BoutRule(int(gap), int(mb)), float(f), float(cf), float(ba[(f, cf, gap, mb)])
 
 
-def bout_rules(path=BOUT_RULE_FILE, epoch_s=1.0):
-    """{person: BoutRule calibrated without that person, 'ALL': on every person}, from scripts/calibrate_bout_rule.py"""
-    d = read_calibration(path, 'scripts/calibrate_bout_rule.py')
+def bout_rules(path=None, epoch_s=1.0):
+    """{person: BoutRule calibrated without that person, 'ALL': on every person}, from the latest run of
+    scripts/calibrate_bout_rule.py (or `path`)"""
+    d = read_calibration('bout_rule', BOUT_RULE_FILE, path)
     return {r.person: BoutRule(int(round(r.max_gap_s / epoch_s)), int(round(r.min_bout_s / epoch_s)))
             for r in d.itertuples()}
 
 
-def mocap_level_factors(path=BOUT_RULE_FILE):
+def mocap_level_factors(path=None):
     """{person: (exit, confirmation) threshold of MoCap / its entry threshold, calibrated without that person; 'ALL':
     on every person}"""
-    d = read_calibration(path, 'scripts/calibrate_bout_rule.py')
+    d = read_calibration('bout_rule', BOUT_RULE_FILE, path)
     return {r.person: (r.mocap_exit_factor, r.mocap_confirm_factor) for r in d.itertuples()}

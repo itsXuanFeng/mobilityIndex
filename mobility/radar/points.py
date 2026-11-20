@@ -7,7 +7,7 @@ Only the measurement is stored: no angle method, no RX sign correction, no TDM D
 orientation. Those are cheap and can be redone from these files without reading the raw data again (13 GB per
 recording, network-bound: ~7 h for the campaign).
 
-Output in OUTPUT_ROOT/<person>/<scenario>/:
+Output in OUTPUT_ROOT/cache/<person>/<scenario>/:
     points.npz          one row per kept cell ("point"), sorted by frame:
         frame   (N,) int32           frame index = row of the cube (rd12_db.npy)
         rbin    (N,) uint8           range bin

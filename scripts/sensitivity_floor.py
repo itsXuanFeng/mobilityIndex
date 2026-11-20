@@ -8,7 +8,8 @@ session caches).
     python scripts/sensitivity_floor.py --workers 16      # reads all cubes once, ~10 min
     python scripts/sensitivity_floor.py --plot-only       # redraw from the saved table
 
-Writes OUTPUT_ROOT/category1/floor_sensitivity.csv and OUTPUT_ROOT/plots/sensitivity/floor_sensitivity.png.
+Writes floor_sensitivity.csv and floor_sensitivity.png to its run folder,
+output/experiments/floor_sensitivity_<time>/.
 """
 import argparse
 import os
@@ -20,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility import evaluation as ev  # noqa: E402
 from mobility.cli import parallel_map, wide_tables  # noqa: E402
-from mobility.config import CATEGORY1_THRESHOLDS, PLOTS_DIR, category_dir  # noqa: E402
+from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.groundtruth import active_speed_thresholds  # noqa: E402
 from mobility.plots.sensitivity import floor_sensitivity_figure  # noqa: E402
 from mobility.radar.cube import load_cube  # noqa: E402
@@ -29,8 +30,6 @@ from mobility.session import load_session  # noqa: E402
 
 PERCENTILES = [5, 10, 20, 35, 50]
 MARGINS_DB = [3, 4.5, 6, 8, 10, 12]
-TABLE = os.path.join(category_dir(1), 'floor_sensitivity.csv')
-FIGURE = os.path.join(PLOTS_DIR, 'sensitivity', 'floor_sensitivity.png')
 
 
 def column(p, m):
@@ -62,8 +61,8 @@ def _epochs(args):
     return epochs(*args)
 
 
-def sweep(workers):
-    recs = pd.read_csv(CATEGORY1_THRESHOLDS).rec.tolist()   # evaluated ones
+def sweep(workers, path):
+    recs = pd.read_csv(latest('category1', 'thresholds.csv')).rec.tolist()   # evaluated ones
     gt_thr = active_speed_thresholds()
     table = pd.concat(parallel_map(_epochs, [(r, gt_thr) for r in recs], workers), ignore_index=True)
     print(f'{table.rec.nunique()} recordings, {table.window.sum()} epochs in the evaluation window')
@@ -76,7 +75,7 @@ def sweep(workers):
     default = ev.epoch_scores(table, 'n_cells', ev.loso_thresholds(table, 'n_cells', gt_thr))
     print(f'check, cached n_cells: AUC {default.auc.median():.3f}, F1 {default.f1.median():.3f}')
     out = pd.DataFrame(rows)
-    out.to_csv(TABLE, index=False)
+    out.to_csv(path, index=False)
     return out
 
 
@@ -84,9 +83,14 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workers', type=int, default=16)
     ap.add_argument('--plot-only', action='store_true', help='redraw from the saved table')
+    add_run_args(ap)
     args = ap.parse_args()
-    res = pd.read_csv(TABLE) if args.plot_only else sweep(args.workers)
-    wide_tables()
-    print(res.round(3).to_string(index=False))
-    floor_sensitivity_figure(res, FIGURE)
-    print(f'wrote {FIGURE}')
+    with run('floor_sensitivity', args, partial=args.plot_only) as run_dir:
+        table = os.path.join(run_dir, 'floor_sensitivity.csv')
+        res = pd.read_csv(latest('floor_sensitivity', 'floor_sensitivity.csv')) if args.plot_only else sweep(
+            args.workers, table)
+        figure = os.path.join(run_dir, 'floor_sensitivity.png')
+        wide_tables()
+        print(res.round(3).to_string(index=False))
+        floor_sensitivity_figure(res, figure)
+        print(f'wrote {figure}')

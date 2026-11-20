@@ -1,6 +1,4 @@
 """Small helpers: NaN-aware signals, runs of a mask, thresholds, calibration tables, summaries."""
-import os
-
 import numpy as np
 import pandas as pd
 from scipy.ndimage import uniform_filter1d
@@ -56,11 +54,11 @@ def best_threshold(x, y):
 
 # ---- leave-one-subject-out calibration tables ----
 
-def read_calibration(path, script):
-    """a calibration table (csv) written by `script`; FileNotFoundError telling to run it when missing"""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'{path} missing: run {script} first')
-    return pd.read_csv(path)
+def read_calibration(experiment, filename, path=None):
+    """a calibration table (csv): `path` if given, else `filename` in the latest run of `experiment`
+    (mobility.experiment.latest; FileNotFoundError telling which script to run when there is none)"""
+    from .experiment import latest
+    return pd.read_csv(path or latest(experiment, filename))
 
 
 def fold_of(per_person, person):

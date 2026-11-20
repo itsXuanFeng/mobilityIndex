@@ -1,6 +1,7 @@
 """
 One recording, ready for metrics: per radar frame, the radar features, the aligned MoCap signals, the labels and the
-masks of the evaluation window. Built from the cube (mobility.radar.cube); cached in OUTPUT_ROOT/<person>/<scenario>/:
+masks of the evaluation window. Built from the cube (mobility.radar.cube); cached in
+OUTPUT_ROOT/cache/<person>/<scenario>/:
     features.npz, angle_features.npz    radar features (mobility.radar.cache)
     subject.json, mocap_50hz.npz        MoCap shot, subject track and its signals (mobility.groundtruth)
     alignment.json                      time offset of radar frame 0; recomputed when the cube is newer

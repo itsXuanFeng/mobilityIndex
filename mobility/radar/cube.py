@@ -1,7 +1,7 @@
 """
 The one expensive step: read a raw recording once and store its per-frame range-Doppler power.
 
-Output in OUTPUT_ROOT/<person>/<scenario>/:
+Output in OUTPUT_ROOT/cache/<person>/<scenario>/:
     rd12_db.npy      (T, 128 range, 128 Doppler) float16, dB of the mean power over the 12 virtual channels
     pass_info.json   frames without data, frames damaged by lost packets, timing
 Row j is frame j (j / 20 s after radar frame 0). NaN rows: frames missing from the files, all-zero frames, and frames

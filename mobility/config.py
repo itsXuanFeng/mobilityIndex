@@ -11,25 +11,19 @@ FMCW_ROOT = f'{CAMPAIGN}/FMCW'
 MOCAP_ROOT = f'{CAMPAIGN}/MOCAP_playback'
 LABEL_ROOT = f'{CAMPAIGN}/timestamps'
 
-# everything this package writes: radar cubes, cached features, evaluation tables, plots
+# everything this package writes (git-ignored; MOBILITY_OUTPUT overrides the location):
+#   cache/<person>/<scenario>/   per-recording caches: radar cube, angle-pass points, features, MoCap signals, alignment
+#   experiments/<name>_<time>/   one folder per run of a script: tables, figures, log, run.json (mobility.experiment)
+#   latest/<name>                symlink to the last finished, complete run of each experiment; what other runs read
 OUTPUT_ROOT = os.environ.get('MOBILITY_OUTPUT', os.path.join(REPO, 'output'))
-GROUNDTRUTH_DIR = os.path.join(OUTPUT_ROOT, 'groundtruth')   # MoCap calibrations against the labels and the script
-PLOTS_DIR = os.path.join(OUTPUT_ROOT, 'plots')
+CACHE_ROOT = os.path.join(OUTPUT_ROOT, 'cache')
+EXPERIMENTS_DIR = os.path.join(OUTPUT_ROOT, 'experiments')
+LATEST_DIR = os.path.join(OUTPUT_ROOT, 'latest')
 
 
 def recording_dir(person, scenario):
-    """per-recording outputs: cube, cached features, MoCap signals, alignment"""
-    return os.path.join(OUTPUT_ROOT, person, scenario)
-
-
-def category_dir(category):
-    """evaluation tables of one category (scripts/evaluate_category<k>.py)"""
-    return os.path.join(OUTPUT_ROOT, f'category{category}')
-
-
-# per recording evaluated in Category 1: the radar and MoCap active thresholds used for it. Categories 2-3, the
-# plots and the Category 1 explorations evaluate the same recordings with these thresholds.
-CATEGORY1_THRESHOLDS = os.path.join(category_dir(1), 'thresholds.csv')
+    """per-recording cache: cube, cached features, MoCap signals, alignment"""
+    return os.path.join(CACHE_ROOT, person, scenario)
 
 # ---- radar (mobility/io/config.mmwave.json) ----
 FPS = 20                     # frames per second

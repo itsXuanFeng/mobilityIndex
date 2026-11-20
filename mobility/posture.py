@@ -21,13 +21,12 @@ the transitions because per epoch it is decided by label noise: the few floor ep
 getting up push it to the top of the wide gap between the floor (< 0.2 m) and sitting on furniture (> 0.43 m), where it
 turns sitting on a low bed edge into "floor".
 """
-import os
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from .config import EPOCH_S, FPS, GROUNDTRUTH_DIR, LABEL_MARGIN_S, RADAR_XYZ, category_dir
+from .config import EPOCH_S, FPS, LABEL_MARGIN_S, RADAR_XYZ
 from .groundtruth import mocap_50hz
 from .io.mocap import MOCAP_FPS
 from .io.recordings import labels as load_labels
@@ -39,7 +38,7 @@ UNKNOWN = -1
 POSTURES = ('standing', 'sitting', 'lying', 'floor')
 LEVEL = {STANDING: 3, SITTING: 2, LYING: 1, FLOOR: 0}     # height order: a transition to a lower level is "down"
 
-POSTURE_RULE_FILE = os.path.join(GROUNDTRUTH_DIR, 'posture_rule.csv')
+POSTURE_RULE_FILE = 'posture_rule.csv'   # in the posture_rule run (scripts/calibrate_posture.py)
 GRID_LOW_FLOOR = (0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45)   # m
 GRID_MIN_HOLD_S = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0)
 
@@ -142,10 +141,10 @@ def calibrate_thresholds(epochs, exclude_person=None):
     return hip_stand, trunk_lie
 
 
-def posture_rules(path=POSTURE_RULE_FILE):
-    """{person: PostureRule calibrated without that person, 'ALL': on every person}, from
-    scripts/calibrate_posture.py"""
-    d = read_calibration(path, 'scripts/calibrate_posture.py')
+def posture_rules(path=None):
+    """{person: PostureRule calibrated without that person, 'ALL': on every person}, from the latest run of
+    scripts/calibrate_posture.py (or `path`)"""
+    d = read_calibration('posture_rule', POSTURE_RULE_FILE, path)
     return {r.person: PostureRule(r.hip_stand, r.low_floor, r.trunk_lie, r.min_hold_s) for r in d.itertuples()}
 
 
@@ -153,7 +152,7 @@ def posture_rules(path=POSTURE_RULE_FILE):
 
 HEIGHT_SMOOTH_S = 1.0                 # running median of the radar height over this long
 GRID_OFFAXIS_K = (0.0, 0.05, 0.1, 0.15, 0.2)   # m of height per m from the radar axis (RadarPostureRule.offaxis_k)
-RADAR_POSTURE_RULE_FILE = os.path.join(category_dir(3), 'radar_posture_rule.csv')   # evaluate_category3
+RADAR_POSTURE_RULE_FILE = 'radar_posture_rule.csv'   # in the category3 run (scripts/evaluate_category3.py)
 
 
 @dataclass(frozen=True)
@@ -228,8 +227,9 @@ def calibrate_radar_thresholds(epochs, exclude_person=None):
     return split(STANDING, SITTING), split(SITTING, LYING), split(LYING, FLOOR)
 
 
-def radar_posture_rules(path=RADAR_POSTURE_RULE_FILE):
-    """{person: RadarPostureRule calibrated without that person, 'ALL': on every person}"""
-    d = read_calibration(path, 'scripts/evaluate_category3.py')
+def radar_posture_rules(path=None):
+    """{person: RadarPostureRule calibrated without that person, 'ALL': on every person}, from the latest run of
+    scripts/evaluate_category3.py (or `path`)"""
+    d = read_calibration('category3', RADAR_POSTURE_RULE_FILE, path)
     return {r.person: RadarPostureRule(r.h_stand, r.h_sit, r.h_floor, r.min_hold_s, r.offaxis_k)
             for r in d.itertuples()}

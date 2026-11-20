@@ -12,7 +12,7 @@ and the base of B and C), and scripts/calibrate_posture.py.
 
     python scripts/evaluate_personal_calibration.py --workers 16
 
-Writes to OUTPUT_ROOT/personal/:
+Writes to its run folder, output/experiments/personal_<time>/:
     shrinkage.csv   per left-out person: the shrinkage weights chosen on the other persons
     params.csv      per recording and setup: every personal parameter used
     metrics.csv     per recording, setup and metric: radar and MoCap value
@@ -32,14 +32,14 @@ from sklearn.metrics import f1_score
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.bouts import BoutRule  # noqa: E402
 from mobility.cli import error_summary, parallel_map, wide_tables  # noqa: E402
-from mobility.config import CATEGORY1_THRESHOLDS, EPOCH_FRAMES, EPOCH_S, OUTPUT_ROOT, category_dir  # noqa: E402
+from mobility.config import EPOCH_FRAMES, EPOCH_S  # noqa: E402
 from mobility.evaluation import personal as pc  # noqa: E402
 from mobility.evaluation.category3 import posture_scores  # noqa: E402
+from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.labels import ACTIVE, INACTIVE  # noqa: E402
 from mobility.posture import UNKNOWN, epoch_posture, posture_rules, radar_posture_rules  # noqa: E402
 from mobility.utils import fold_of, spread  # noqa: E402
 
-OUT = os.path.join(OUTPUT_ROOT, 'personal')
 # filled before the pools fork
 DATA, BY_PERSON, LOSO, OWN, LEVELS, HEIGHTS = {}, {}, {}, {}, {}, {}
 
@@ -213,85 +213,87 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workers', type=int, default=1)
     ap.add_argument('--persons', nargs='+', help='only these persons (a quick check; at least 3)')
+    add_run_args(ap)
     args = ap.parse_args()
-    os.makedirs(OUT, exist_ok=True)
-    wide_tables(max_columns=30)
-    th = pd.read_csv(CATEGORY1_THRESHOLDS)
-    if args.persons:
-        th = th[th.person.isin(args.persons)]
-    mrules, rrules = posture_rules(), radar_posture_rules()
-    c2 = pd.read_csv(os.path.join(category_dir(2), 'rules.csv')).groupby('person').first()
+    with run('personal', args, partial=bool(args.persons)) as run_dir:
+        OUT = run_dir
+        wide_tables(max_columns=30)
+        th = pd.read_csv(latest('category1', 'thresholds.csv'))
+        if args.persons:
+            th = th[th.person.isin(args.persons)]
+        mrules, rrules = posture_rules(), radar_posture_rules()
+        c2 = pd.read_csv(latest('category2', 'rules.csv')).groupby('person').first()
 
-    res = parallel_map(prepare, [(r, fold_of(mrules, r.person)) for _, r in th.iterrows()], args.workers)
-    failed = [e for _, e in res if e]
-    if failed:
-        print(f'{len(failed)} recordings FAILED and are left out:\n  ' + '\n  '.join(failed))
-    DATA.update({d['rec']: d for d, e in res if not e})
-    for d in DATA.values():
-        BY_PERSON.setdefault(d['person'], []).append(d)
-    clip_s = [d['clip'].sum() for d in DATA.values()]
-    eval_s = [d['eval'].sum() for d in DATA.values()]
-    print(f'{len(DATA)} recordings, {len(BY_PERSON)} persons; clip {spread(clip_s, ".0f")} s, evaluated '
-          f'{spread(eval_s, ".0f")} s per recording', flush=True)
+        res = parallel_map(prepare, [(r, fold_of(mrules, r.person)) for _, r in th.iterrows()], args.workers)
+        failed = [e for _, e in res if e]
+        if failed:
+            print(f'{len(failed)} recordings FAILED and are left out:\n  ' + '\n  '.join(failed))
+        DATA.update({d['rec']: d for d, e in res if not e})
+        for d in DATA.values():
+            BY_PERSON.setdefault(d['person'], []).append(d)
+        clip_s = [d['clip'].sum() for d in DATA.values()]
+        eval_s = [d['eval'].sum() for d in DATA.values()]
+        print(f'{len(DATA)} recordings, {len(BY_PERSON)} persons; clip {spread(clip_s, ".0f")} s, evaluated '
+              f'{spread(eval_s, ".0f")} s per recording', flush=True)
 
-    per = th.groupby('person').first()
-    for p in BY_PERSON:
-        r = c2.loc[p]
-        LOSO[p] = dict(radar_thr=per.radar_threshold[p], mocap_thr=per.mocap_threshold[p], delta=r.radar_exit_delta,
-                       eps=r.radar_confirm_eps, mocap_factors=(r.mocap_exit_factor, r.mocap_confirm_factor),
-                       bout_rule=BoutRule(int(round(r.max_gap_s / EPOCH_S)), int(round(r.min_bout_s / EPOCH_S))),
-                       rule3=fold_of(rrules, p),
-                       energy_factor=pc.energy_factor([d for d in DATA.values() if d['person'] != p]))
-    ks = {L['rule3'].offaxis_k for L in LOSO.values()}
-    for r, d in DATA.items():
-        LEVELS[r] = pc.clip_levels(d)
-        for k in ks:
-            HEIGHTS[r, k] = pc.clip_heights(d, k)
+        per = th.groupby('person').first()
+        for p in BY_PERSON:
+            r = c2.loc[p]
+            LOSO[p] = dict(radar_thr=per.radar_threshold[p], mocap_thr=per.mocap_threshold[p], delta=r.radar_exit_delta,
+                           eps=r.radar_confirm_eps, mocap_factors=(r.mocap_exit_factor, r.mocap_confirm_factor),
+                           bout_rule=BoutRule(int(round(r.max_gap_s / EPOCH_S)), int(round(r.min_bout_s / EPOCH_S))),
+                           rule3=fold_of(rrules, p),
+                           energy_factor=pc.energy_factor([d for d in DATA.values() if d['person'] != p]))
+        ks = {L['rule3'].offaxis_k for L in LOSO.values()}
+        for r, d in DATA.items():
+            LEVELS[r] = pc.clip_levels(d)
+            for k in ks:
+                HEIGHTS[r, k] = pc.clip_heights(d, k)
 
-    OWN.update(dict(parallel_map(own_params, list(DATA), args.workers)))
-    print('setup C person parameters done', flush=True)
-    wts = pd.DataFrame(parallel_map(choose_weights, sorted(BY_PERSON), args.workers))
-    wts.to_csv(f'{OUT}/shrinkage.csv', index=False)
-    print(f'shrinkage weights chosen per left-out person:\n'
-          f'{wts.drop(columns="person").apply(lambda c: c.value_counts()).fillna(0).astype(int).to_string()}',
-          flush=True)
-    wof = wts.set_index('person').to_dict('index')
+        OWN.update(dict(parallel_map(own_params, list(DATA), args.workers)))
+        print('setup C person parameters done', flush=True)
+        wts = pd.DataFrame(parallel_map(choose_weights, sorted(BY_PERSON), args.workers))
+        wts.to_csv(f'{OUT}/shrinkage.csv', index=False)
+        print(f'shrinkage weights chosen per left-out person:\n'
+              f'{wts.drop(columns="person").apply(lambda c: c.value_counts()).fillna(0).astype(int).to_string()}',
+              flush=True)
+        wof = wts.set_index('person').to_dict('index')
 
-    out = parallel_map(evaluate, [(r, wof[d['person']]) for r, d in DATA.items()], args.workers)
-    params = pd.DataFrame([x for o in out for x in o[0]])
-    mt = pd.DataFrame([x for o in out for x in o[1]])
-    sc = pd.DataFrame([x for o in out for x in o[2]])
-    params.to_csv(f'{OUT}/params.csv', index=False)
-    mt.to_csv(f'{OUT}/metrics.csv', index=False)
-    sc.to_csv(f'{OUT}/scores.csv', index=False)
+        out = parallel_map(evaluate, [(r, wof[d['person']]) for r, d in DATA.items()], args.workers)
+        params = pd.DataFrame([x for o in out for x in o[0]])
+        mt = pd.DataFrame([x for o in out for x in o[1]])
+        sc = pd.DataFrame([x for o in out for x in o[2]])
+        params.to_csv(f'{OUT}/params.csv', index=False)
+        mt.to_csv(f'{OUT}/metrics.csv', index=False)
+        sc.to_csv(f'{OUT}/scores.csv', index=False)
 
-    rows = []
-    mt['abs_err'] = (mt.radar - mt.mocap).abs()
-    for k, g in mt.groupby('metric', sort=False):
-        a = g[g.setup == 'A'].set_index('rec').abs_err
-        for s, gs in g.groupby('setup'):
-            gs = gs.set_index('rec')
-            row = dict(metric=k, setup=s, n=int(gs.abs_err.notna().sum()), mae=gs.abs_err.mean(),
-                       bias=(gs.radar - gs.mocap).mean(), rel_mae=gs.abs_err.mean() / gs.mocap.abs().mean())
-            if 'energy' in k:                  # different units on both sides: also the rank agreement
-                row['spearman'] = spearmanr(gs.radar, gs.mocap, nan_policy='omit')[0]
-            if s != 'A':
-                j = a.index.intersection(gs.index[gs.abs_err.notna() & a.reindex(gs.index).notna()])
-                row.update({f'{c}_vs_A': v for c, v in paired(a[j], gs.abs_err[j]).items()})
-            rows.append(row)
-    for k in ('f1_active', 'bout_f1', 'posture_f1', 'transition_f1'):
-        a = sc[sc.setup == 'A'].set_index('rec')[k]
-        for s, gs in sc.groupby('setup'):
-            x = gs.set_index('rec')[k]
-            row = dict(metric=k, setup=s, n=int(x.notna().sum()), median=x.median(), mean=x.mean())
-            if s != 'A':
-                j = a.index[a.notna() & x.reindex(a.index).notna()]
-                row.update({f'{c}_vs_A': v for c, v in paired(-a[j], -x[j]).items()})   # higher is better
-            rows.append(row)
-    summary = pd.DataFrame(rows)
-    summary.to_csv(f'{OUT}/summary.csv', index=False)
-    print(f'\n{summary.round(4).to_string(index=False)}')
-    print(f'\npersonal parameters, median [10th-90th percentile] over recordings:')
-    for s, g in params.groupby('setup'):
-        print(f'  {s}: ' + ', '.join(f'{c} {spread(g[c])}' for c in ('radar_threshold', 'energy_factor', 'delta',
-                                                                      'eps', 'h_stand', 'h_sit', 'h_floor')))
+        rows = []
+        mt['abs_err'] = (mt.radar - mt.mocap).abs()
+        for k, g in mt.groupby('metric', sort=False):
+            a = g[g.setup == 'A'].set_index('rec').abs_err
+            for s, gs in g.groupby('setup'):
+                gs = gs.set_index('rec')
+                row = dict(metric=k, setup=s, n=int(gs.abs_err.notna().sum()), mae=gs.abs_err.mean(),
+                           bias=(gs.radar - gs.mocap).mean(), rel_mae=gs.abs_err.mean() / gs.mocap.abs().mean())
+                if 'energy' in k:                  # different units on both sides: also the rank agreement
+                    row['spearman'] = spearmanr(gs.radar, gs.mocap, nan_policy='omit')[0]
+                if s != 'A':
+                    j = a.index.intersection(gs.index[gs.abs_err.notna() & a.reindex(gs.index).notna()])
+                    row.update({f'{c}_vs_A': v for c, v in paired(a[j], gs.abs_err[j]).items()})
+                rows.append(row)
+        for k in ('f1_active', 'bout_f1', 'posture_f1', 'transition_f1'):
+            a = sc[sc.setup == 'A'].set_index('rec')[k]
+            for s, gs in sc.groupby('setup'):
+                x = gs.set_index('rec')[k]
+                row = dict(metric=k, setup=s, n=int(x.notna().sum()), median=x.median(), mean=x.mean())
+                if s != 'A':
+                    j = a.index[a.notna() & x.reindex(a.index).notna()]
+                    row.update({f'{c}_vs_A': v for c, v in paired(-a[j], -x[j]).items()})   # higher is better
+                rows.append(row)
+        summary = pd.DataFrame(rows)
+        summary.to_csv(f'{OUT}/summary.csv', index=False)
+        print(f'\n{summary.round(4).to_string(index=False)}')
+        print(f'\npersonal parameters, median [10th-90th percentile] over recordings:')
+        for s, g in params.groupby('setup'):
+            print(f'  {s}: ' + ', '.join(f'{c} {spread(g[c])}' for c in ('radar_threshold', 'energy_factor', 'delta',
+                                                                          'eps', 'h_stand', 'h_sit', 'h_floor')))

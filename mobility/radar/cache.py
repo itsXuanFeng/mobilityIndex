@@ -1,5 +1,5 @@
 """
-Per-recording caches of the per-frame radar features, in OUTPUT_ROOT/<person>/<scenario>/:
+Per-recording caches of the per-frame radar features, in OUTPUT_ROOT/cache/<person>/<scenario>/:
     features.npz          radar features of the cube (mobility.radar.features) and the noise floor `_floor_db`;
                           missing ones are added when new features are registered; recomputed when the cube is newer
     angle_features.npz    the person's height, position and speeds per frame, from the angle pass

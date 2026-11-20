@@ -14,19 +14,22 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.cli import recordings  # noqa: E402
+from mobility.experiment import add_run_args, run  # noqa: E402
 from mobility.radar.cube import write_cube  # noqa: E402
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO')
     ap.add_argument('--overwrite', action='store_true')
+    add_run_args(ap)
     args = ap.parse_args()
-    failed = []
-    for person, scenario in recordings(args.only):
-        try:
-            write_cube(person, scenario, args.overwrite)
-        except Exception:
-            traceback.print_exc()
-            failed.append(f'{person}/{scenario}')
-    if failed:
-        sys.exit(f'FAILED: {" ".join(failed)}')
+    with run('radar_pass', args, partial=bool(args.only)) as run_dir:
+        failed = []
+        for person, scenario in recordings(args.only):
+            try:
+                write_cube(person, scenario, args.overwrite)
+            except Exception:
+                traceback.print_exc()
+                failed.append(f'{person}/{scenario}')
+        if failed:
+            sys.exit(f'FAILED: {" ".join(failed)}')
