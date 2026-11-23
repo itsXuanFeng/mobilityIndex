@@ -39,9 +39,12 @@ if __name__ == '__main__':
                                    energy_feature=r.energy_feature)
             rule = BoutRule(int(round(b.max_gap_s / EPOCH_S)), int(round(b.min_bout_s / EPOCH_S)))
             rs.extra['bout_rule'] = ms.extra['bout_rule'] = rule
-            set_bout_levels(rs, ms, (b.radar_exit, b.radar_confirm), (b.mocap_exit, b.mocap_confirm))
+            speed = b.get('radar_confirm_speed')                 # absent in runs before 2026-11-22
+            speed = None if speed is None or pd.isna(speed) else float(speed)
+            set_bout_levels(rs, ms, (b.radar_exit, b.radar_confirm), (b.mocap_exit, b.mocap_confirm), speed)
             note = (f'MoCap exit {b.mocap_exit_factor:g}x, confirm {b.mocap_confirm_factor:g}x entry; radar exit '
-                    f'-{b.radar_exit_delta:g}, confirm +{b.radar_confirm_eps:g}; {rule}. ')
+                    f'-{b.radar_exit_delta:g}, confirm +{b.radar_confirm_eps:g}'
+                    f'{"" if speed is None else f" and {speed:g} m/s"}; {rule}. ')
             path = os.path.join(out, f'{s.person}_{s.scenario}_bouts.png')
             bouts_figure(s, bout_frame(rs, ms), path, note)
             print(path)

@@ -7,8 +7,11 @@ epochs (mobility.transitions). mobility.evaluation.metric_table sets both.
 """
 from dataclasses import dataclass, field
 
+import warnings
+
 import numpy as np
 
+from .bouts import SPEED_FEATURE
 from .config import EPOCH_FRAMES, EPOCH_S, MAX_MOCAP_RMS
 from .groundtruth import active_speed_thresholds
 from .radar.features import FEATURES
@@ -42,16 +45,30 @@ def feature_level(session, name, n=None):
     return epoch_mean(log_level(x) if FEATURES[name].log else x, n)
 
 
+def epoch_speed(session, n=None, name=SPEED_FEATURE):
+    """(E,) per-epoch radar speed (m/s) for the Category 2 speed confirmation: the mean of `name` over the frames of
+    the epoch that have a value (frames with moving points); 0 where no frame has one (nothing seen moving)"""
+    n = n or EPOCH_FRAMES
+    x = np.asarray(session.radar[name], float)
+    T = len(x) // n * n
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)   # all-NaN epochs
+        v = np.nanmean(x[:T].reshape(-1, n), axis=1)
+    return np.nan_to_num(v, nan=0.0)
+
+
 def radar_states(session, threshold, active_feature='n_cells', energy_feature='e_move', window='window'):
     """active when the epoch level of active_feature exceeds threshold (calibrated against MoCap); energy from
     energy_feature (e_move: mean squared radial speed of the person's points plus their horizontal speed squared,
-    from the angle pass)"""
+    from the angle pass). extra['speed']: epoch_speed, when the angle pass provides it (Category 2 option)."""
     n, t, valid = _epochs(session, window)
     level = feature_level(session, active_feature, n)
     energy = epoch_mean(session.radar[energy_feature], n)
     valid &= ~np.isnan(level) & ~np.isnan(energy)
-    return States('radar', t, energy, level, level > threshold, valid,
-                  extra=dict(active_feature=active_feature, energy_feature=energy_feature, threshold=threshold))
+    extra = dict(active_feature=active_feature, energy_feature=energy_feature, threshold=threshold)
+    if SPEED_FEATURE in session.radar:
+        extra['speed'] = epoch_speed(session, n)[:len(t)]
+    return States('radar', t, energy, level, level > threshold, valid, extra=extra)
 
 
 def mocap_states(session, active_speed=None, window='window'):

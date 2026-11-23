@@ -26,7 +26,7 @@ Personal parameters:
                  energy conversion factor   C: LOSO + w_own x (the person's other recordings - LOSO); A and B: LOSO
                                                (so B's energy equals A's: the clip has no energy reference)
     Category 2   radar entry                the Category 1 radar threshold of the setup
-                 radar exit delta, confirmation eps   C: the person's other recordings (as loso_radar_bout_levels)
+                 radar exit delta, confirmation eps   C: the person's other recordings (as loso_radar_untied_levels)
     Category 3   h_stand                    B: LOSO + clip shift; C: LOSO + w x (the person's other recordings against
                                                MoCap - LOSO), w calibrated as the other weights
                  h_sit, h_floor             B and C: LOSO + clip shift
@@ -225,8 +225,9 @@ def active_time_error(d, thr, mocap_thr):
 
 def person_bout_levels(recs, entry, mocap_entry, mocap_factors, rule, deltas=RADAR_EXIT_DELTAS,
                        eps=RADAR_CONFIRM_EPS):
-    """(delta, eps) on the recordings' valid epochs, as loso_radar_bout_levels: eps by the bout count, then delta by
-    the mean bout duration; ties: the smallest"""
+    """(delta, eps) on the recordings' valid epochs, as loso_radar_untied_levels (the definition until 2026-11-21; the
+    LOSO reference is now one margin kappa, read from category2/rules.csv as delta = eps = kappa): eps by the bout
+    count, then delta by the mean bout duration; ties: the smallest"""
     def mean_duration(b):
         return (b[:, 1] - b[:, 0]).mean() if len(b) else np.nan
 

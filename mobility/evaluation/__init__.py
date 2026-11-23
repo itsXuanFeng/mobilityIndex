@@ -22,8 +22,9 @@ from .agreement import (agreement_with_baseline, energy_conversion, metric_agree
                         metric_table, paired_states)
 from .category1 import (count_epoch_table, distance_residuals, epoch_pairs, epoch_scores, epoch_table,
                         loso_thresholds, per_label, per_person)
-from .category2 import (BOUT_MATCH_IOU, RADAR_CONFIRM_EPS, RADAR_EXIT_DELTAS, bout_events, bout_frame,
-                        bout_scores, evaluate_bouts, loso_radar_bout_levels, match_bouts)
+from .category2 import (BOUT_MATCH_IOU, RADAR_CONFIRM_EPS, RADAR_CONFIRM_SPEEDS, RADAR_EXIT_DELTAS, RADAR_KAPPAS,
+                        bout_events, bout_frame, bout_scores, evaluate_bouts, loso_radar_bout_levels,
+                        loso_radar_untied_levels, match_bouts)
 from .category3 import (CLASSIFIERS, HAND_RULE_GRID, INNER_FOLDS, burst_classifier_fold,
                         calibrate_height_rule, calibrate_peak, fit_burst_model, hand_rule_baseline, height_epochs,
                         peak_measures, peak_pairs, per_kind_table, posture_scores, prepare_recording, radar_events,
@@ -34,8 +35,9 @@ __all__ = [
     'calibrate_height_rule', 'calibrate_peak', 'CLASSIFIERS', 'count_epoch_table', 'distance_residuals',
     'energy_conversion', 'epoch_pairs', 'epoch_scores', 'epoch_table', 'evaluate_bouts', 'fit_burst_model',
     'hand_rule_baseline', 'HAND_RULE_GRID', 'height_epochs', 'INNER_FOLDS', 'loso_radar_bout_levels',
-    'loso_thresholds', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'paired_states',
+    'loso_radar_untied_levels', 'loso_thresholds', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'paired_states',
     'peak_measures', 'peak_pairs', 'per_kind_table', 'per_label', 'per_person', 'posture_scores',
-    'prepare_recording', 'RADAR_CONFIRM_EPS', 'radar_events', 'RADAR_EXIT_DELTAS', 'set_bout_levels',
+    'prepare_recording', 'RADAR_CONFIRM_EPS', 'RADAR_CONFIRM_SPEEDS', 'radar_events', 'RADAR_EXIT_DELTAS',
+    'RADAR_KAPPAS', 'set_bout_levels',
     'transition_events', 'transition_scores', 'window_filter',
 ]

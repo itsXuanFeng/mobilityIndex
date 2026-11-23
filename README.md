@@ -62,7 +62,7 @@ mobility/                  the package
   evaluation/              radar vs MoCap, everything calibrated leave-one-subject-out:
     agreement.py           per recording: metrics of both sensors, agreement, no-sensor baseline (all categories)
     category1.py           per epoch: AUC, F1, radar thresholds; per person, per activity, per distance
-    category2.py           bouts per epoch and per bout; radar exit and confirmation thresholds
+    category2.py           bouts per epoch and per bout; the radar bout margin κ (one parameter)
     category3.py           transitions per event, posture per epoch; height rule, peak quantile, comparison methods
     personal.py            personal calibration on top of leave-one-subject-out
   plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, per_person.py,
@@ -178,7 +178,7 @@ def longest_bout(s):
     return float(_durations(s).max())        # helpers of the category's module
 ```
 
-It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule and the exit and confirmation thresholds from `States.extra['bout_rule']`, `['exit_threshold']` and `['confirm_threshold']`, which `metric_table(..., bout_rules=..., bout_levels=...)` sets. Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
+It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule and the exit and confirmation thresholds from `States.extra['bout_rule']`, `['exit_threshold']` and `['confirm_threshold']` (and an optional radar `['confirm_speed']`), which `metric_table(..., bout_rules=..., bout_levels=...)` sets. Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
 
 **State a metric needs**: add a field to `States` in `mobility/states.py` and fill it in both `radar_states` and `mocap_states` (per epoch), or set it in `metric_table` (events, like `transitions`).
 

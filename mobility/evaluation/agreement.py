@@ -30,9 +30,9 @@ def metric_table(sessions, thresholds, gt_thresholds, category=None, bout_rules=
                  transitions=None, postures=None, **radar_kw):
     """per recording and metric: radar value (with that recording's threshold) and MoCap value. Category 2 needs
     bout_rules: {person: BoutRule calibrated without that person} and bout_levels: {recording: ((radar exit, radar
-    confirmation), (MoCap exit, MoCap confirmation)) thresholds} (see set_bout_levels). Category 3 needs transitions:
-    {recording: (radar events, MoCap events)} (mobility.transitions) and postures: {recording: (radar, MoCap) posture
-    per epoch}."""
+    confirmation), (MoCap exit, MoCap confirmation)[, radar confirmation speed]) thresholds} (see set_bout_levels).
+    Category 3 needs transitions: {recording: (radar events, MoCap events)} (mobility.transitions) and postures:
+    {recording: (radar, MoCap) posture per epoch}."""
     rows = []
     for s in sessions:
         rs, ms = paired_states(s, thresholds[s.name], gt_thresholds[s.person], **radar_kw)

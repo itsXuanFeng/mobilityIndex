@@ -4,7 +4,8 @@ Activity bouts from a per-epoch activity level (Category 2). The same steps are 
        which lasts while the level stays above a lower exit threshold;
     2. confirmation: a run of activity counts only if its level exceeds a higher confirmation threshold at least once
        (drops weak movements, such as arm movements, that just cross the entry threshold). The run keeps its start at
-       the entry threshold;
+       the entry threshold. Optionally (radar only) the run must also reach a confirmation speed: its per-epoch Doppler
+       speed (States.extra['speed'], SPEED_FEATURE) exceeds confirm_speed at least once;
     3. gaps: inactive runs of at most max_gap epochs between two active runs are filled;
     4. minimum bout: active runs shorter than min_bout epochs (after 3) are dropped.
 Each step uses only past epochs; online, a bout is known once it is confirmed, and dated back to its start.
@@ -14,8 +15,9 @@ them. A bout cut by the window edge counts, with the part inside the window.
 Nothing is set by hand. For MoCap, the exit and confirmation thresholds (factors x the entry threshold), max_gap and
 min_bout are calibrated together against the activity labels, leaving the evaluated person out
 (scripts/calibrate_bout_rule.py): the combination that, applied to the MoCap joint speed, best separates active from
-inactive label epochs (balanced accuracy). The radar exit and confirmation thresholds are calibrated against the MoCap
-bouts, also leaving the person out (mobility.evaluation.loso_radar_bout_levels).
+inactive label epochs (balanced accuracy). The radar uses one margin kappa on its log10 level, the same below and above
+the entry (exit = entry - kappa, confirmation = entry + kappa), calibrated against the MoCap bout count, also leaving
+the person out (mobility.evaluation.loso_radar_bout_levels); with the speed option, kappa and confirm_speed together.
 
 Radar and MoCap bouts are compared one to one (match_bouts), by intersection over union.
 """
@@ -36,6 +38,9 @@ GRID_CONFIRM = (1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5)     # MoCap confirmation thre
 # (~0.005), so the labels can't tell such candidates apart; the least smoothing among them is taken
 LABEL_TOLERANCE = 0.001
 BOUT_MATCH_IOU = 0.5   # a radar bout and a MoCap bout match when they overlap by at least this intersection over union
+# radar speed for the optional speed confirmation (mobility.radar.angle): the power-weighted 95th percentile of the
+# |radial velocity| of the person's moving points (m/s); per epoch, the mean over the frames that have one, 0 without
+SPEED_FEATURE = 'v_q950'
 
 
 @dataclass(frozen=True)
@@ -51,10 +56,11 @@ def _level(level):
     return np.nan_to_num(np.asarray(level, float), nan=-np.inf)
 
 
-def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None):
+def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None, speed=None, confirm_speed=None):
     """(E,) bool: active from an epoch that is `active` (above the entry threshold) for as long as the level stays
     above exit_threshold (at most the entry threshold); an invalid epoch ends it. With exit_threshold equal to the
-    entry threshold, this is `active` itself. With confirm_threshold: only the confirmed runs (confirmed)."""
+    entry threshold, this is `active` itself. With confirm_threshold: only the confirmed runs (confirmed), with
+    confirm_speed also on speed."""
     valid = np.asarray(valid, bool)
     start = np.asarray(active, bool) & valid
     above = valid & (_level(level) > exit_threshold)
@@ -64,15 +70,17 @@ def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None):
         if len(h):
             out[s + h[0]:e] = True
     out |= start
-    return out if confirm_threshold is None else confirmed(out, level, confirm_threshold)
+    return out if confirm_threshold is None else confirmed(out, level, confirm_threshold, speed, confirm_speed)
 
 
-def confirmed(active, level, confirm_threshold):
-    """(E,) bool: the runs of `active` whose level exceeds confirm_threshold at least once"""
+def confirmed(active, level, confirm_threshold, speed=None, confirm_speed=None):
+    """(E,) bool: the runs of `active` whose level exceeds confirm_threshold at least once; with confirm_speed (not
+    None), whose speed (per epoch, m/s) also exceeds confirm_speed at least once (not necessarily in the same epoch)"""
     out = np.asarray(active, bool).copy()
     lv = _level(level)
+    sp = None if confirm_speed is None else np.nan_to_num(np.asarray(speed, float), nan=0.0)
     for s, e in runs(out):
-        if lv[s:e].max() <= confirm_threshold:
+        if lv[s:e].max() <= confirm_threshold or (sp is not None and sp[s:e].max() <= confirm_speed):
             out[s:e] = False
     return out
 
@@ -98,10 +106,11 @@ def bouts(active, valid, rule):
     return runs(in_bouts(active, valid, rule))
 
 
-def level_bouts(level, valid, entry, exit_threshold, confirm_threshold, rule):
+def level_bouts(level, valid, entry, exit_threshold, confirm_threshold, rule, speed=None, confirm_speed=None):
     """(n, 2) [start, end) epoch indices of the bouts of an activity level: active above the entry threshold, then
-    hysteresis, confirmation and the bout rule"""
-    return bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold), valid, rule)
+    hysteresis, confirmation (on the level; with confirm_speed also on speed) and the bout rule"""
+    return bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold, speed, confirm_speed),
+                 valid, rule)
 
 
 def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
