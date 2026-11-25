@@ -11,9 +11,14 @@ From the MoCap skeleton, by a rule calibrated against the script, leaving the ev
     floor       otherwise, pelvis or knees below low_floor        (lying, sitting or kneeling on the ground)
     lying       otherwise, trunk more than trunk_lie from vertical
     sitting     otherwise                                          (chair, edge of the bed, upright in bed)
-From the radar, with the angle: the height of the top of the body (RadarPostureRule, below), thresholds calibrated
-against the MoCap posture, leaving the person out. A posture counts only once it has lasted min_hold_s, for MoCap and
-radar alike; mobility.transitions turns the changes into events.
+From the radar, with the angle, two versions:
+    posture model (main)   a hidden semi-Markov model on the top and median height of the person's points
+                           (RadarPostureModel, below): posture followed over time, every change allowed, a posture
+                           lasting at least the MoCap rule's min_hold_s
+    height rule            three thresholds on the top-of-body height (RadarPostureRule), carried forward while unseen;
+                           kept as a comparison
+both calibrated against the MoCap posture, leaving the person out. A posture counts only once it has lasted min_hold_s,
+for MoCap and radar alike; mobility.transitions turns the changes into events.
 
 hip_stand and trunk_lie maximise the balanced accuracy per 1 s epoch against the scripted posture. low_floor and
 min_hold_s maximise how well the resulting transitions reproduce the scripted changes (F1). The floor is calibrated on
@@ -233,3 +238,178 @@ def radar_posture_rules(path=None):
     d = read_calibration('category3', RADAR_POSTURE_RULE_FILE, path)
     return {r.person: RadarPostureRule(r.h_stand, r.h_sit, r.h_floor, r.min_hold_s, r.offaxis_k)
             for r in d.itertuples()}
+
+
+# ---- from the radar: the posture model (main method) ----
+
+POSTURE_MODEL_FILE = 'radar_posture_model.csv'   # in the category3 run (scripts/evaluate_category3.py)
+OUTLIER_DENSITY = 0.02    # 1/m^2: uniform outlier component of the emission, so one stray frame can't decide alone
+P_STILL = 1e-6            # per frame: chance of a posture change while the radar sees no movement
+MOVING_WIDEN_S = 1.0      # the movement gate is widened by this on both sides (the heights are smoothed over 1 s)
+GRID_BETA = (0.05, 0.1, 0.2)          # weight of one frame's evidence (frames 50 ms apart aren't independent)
+GRID_P_MOVE = (1e-3, 3e-3, 1e-2)      # per frame: chance of a posture change while the person moves
+ALLOWED = ~np.eye(len(POSTURES), dtype=bool)   # every posture change is allowed (falls from a chair or bed too)
+EMISSION_STEP = 5         # fit the emission on every 5th frame (neighbouring frames are nearly identical)
+
+
+@dataclass(eq=False)
+class RadarPostureModel:
+    """
+    Posture as a hidden state followed over time (a hidden semi-Markov model), from two heights of the person's points
+    (mobility.radar.angle.frame_features, 1 s running medians): the top of the body (h_top) and their median (h_med).
+
+    emission    per posture k, [h_top, h_med] ~ N(coef[k, 0] + coef[k, 1] * d, cov[k]), d the distance from the radar
+                axis: off-axis the radar sees less of the top of the head, by an amount that depends on the posture
+                (when sitting about -0.12 m per m, standing and lying about 0). A uniform outlier component
+                (OUTLIER_DENSITY) and the weight beta (< 1: frames are not independent) keep single frames from
+                deciding. Where the radar doesn't see the person there is no evidence: the posture persists.
+    durations   a posture lasts at least d_min_s (a chain of sub-states), then may end at any frame: with probability
+                p_move while the person moves (Category 1 active, widened by MOVING_WIDEN_S), P_STILL otherwise.
+                d_min_s is the MoCap posture rule's min_hold_s, so both sensors define a posture the same way; on
+                the scripted campaign a longer one would always score better, because its short postures are passing
+                phases (kneeling while getting up, bending), so it is not calibrated on the radar (docs/category3.md).
+    changes     every posture change allowed (ALLOWED), all equally likely: nothing about the script is learned.
+    decoding    Viterbi (decode_postures); the transitions are the changes of the decoded posture, with no further
+                hold (mobility.transitions.posture_transitions with one frame).
+
+    coef, cov: fitted on the frames where MoCap gives the posture (fit_posture_emission); beta and p_move maximise the
+    transition F1 against MoCap; all leaving the evaluated person out (mobility.evaluation.calibrate_posture_model).
+    """
+    coef: np.ndarray      # (4, 2, 2): posture, (intercept, slope per m from the axis), (h_top, h_med)
+    cov: np.ndarray       # (4, 2, 2): posture, residual covariance of (h_top, h_med)
+    beta: float = 0.1
+    p_move: float = 3e-3
+    d_min_s: float = 3.0
+    p_still: float = P_STILL
+
+    def with_settings(self, beta, p_move):
+        return RadarPostureModel(self.coef, self.cov, beta, p_move, self.d_min_s, self.p_still)
+
+    def log_emission(self, top, med, offaxis):
+        """(T, 4) weighted log-likelihood of each posture per frame, relative to the most likely one; 0 where the
+        person isn't seen"""
+        Y = np.stack([np.asarray(top, float), np.asarray(med, float)], 1)
+        d = np.nan_to_num(np.asarray(offaxis, float))
+        out = np.zeros((len(Y), len(POSTURES)))
+        ok = ~np.isnan(Y).any(1)
+        for k in range(len(POSTURES)):
+            R = Y[ok] - (self.coef[k, 0] + d[ok, None] * self.coef[k, 1])
+            S = self.cov[k]
+            ll = (-0.5 * np.einsum('ti,ij,tj->t', R, np.linalg.inv(S), R)
+                  - 0.5 * np.log(np.linalg.det(2 * np.pi * S)))
+            out[ok, k] = np.logaddexp(ll, np.log(OUTLIER_DENSITY))
+        out[ok] -= out[ok].max(1, keepdims=True)
+        return self.beta * out
+
+    def row(self):
+        """the model as one flat table row (radar_posture_model.csv)"""
+        r = dict(beta=self.beta, p_move=self.p_move, d_min_s=self.d_min_s, p_still=self.p_still)
+        for k, name in enumerate(POSTURES):
+            r.update({f'{name}_top_m': self.coef[k, 0, 0], f'{name}_med_m': self.coef[k, 0, 1],
+                      f'{name}_top_per_m': self.coef[k, 1, 0], f'{name}_med_per_m': self.coef[k, 1, 1],
+                      f'{name}_top_sd': np.sqrt(self.cov[k, 0, 0]), f'{name}_med_sd': np.sqrt(self.cov[k, 1, 1]),
+                      f'{name}_corr': self.cov[k, 0, 1] / np.sqrt(self.cov[k, 0, 0] * self.cov[k, 1, 1])})
+        return r
+
+    @classmethod
+    def from_row(cls, r):
+        coef, cov = np.zeros((len(POSTURES), 2, 2)), np.zeros((len(POSTURES), 2, 2))
+        for k, name in enumerate(POSTURES):
+            coef[k] = [[r[f'{name}_top_m'], r[f'{name}_med_m']], [r[f'{name}_top_per_m'], r[f'{name}_med_per_m']]]
+            st, sm, c = r[f'{name}_top_sd'], r[f'{name}_med_sd'], r[f'{name}_corr']
+            cov[k] = [[st ** 2, c * st * sm], [c * st * sm, sm ** 2]]
+        return cls(coef, cov, r['beta'], r['p_move'], r['d_min_s'], r['p_still'])
+
+    def __str__(self):
+        mean = ', '.join(f'{name} {self.coef[k, 0, 0]:.2f} / {self.coef[k, 0, 1]:.2f} m'
+                         for k, name in enumerate(POSTURES))
+        return (f'top / median height on the axis: {mean}; sitting top {self.coef[SITTING, 1, 0]:+.3f} m per m '
+                f'off-axis; beta {self.beta:g}, p_move {self.p_move:g}, minimum posture {self.d_min_s:g} s')
+
+
+def radar_median_height(session):
+    """the median height of the person's points per frame, smoothed as radar_height"""
+    return _running_median(session.radar['h_med'])
+
+
+def radar_moving(session, threshold, feature='n_cells'):
+    """(T,) bool: the person moves, per frame: the Category 1 activity feature above its threshold (calibrated
+    against MoCap without this person), widened by MOVING_WIDEN_S on both sides"""
+    a = np.nan_to_num(np.asarray(session.radar[feature], float)) > threshold
+    w = int(round(MOVING_WIDEN_S * FPS))
+    return pd.Series(a.astype(float)).rolling(2 * w + 1, center=True, min_periods=1).max().values > 0
+
+
+def fit_posture_emission(top, med, offaxis, posture):
+    """(coef, cov) of RadarPostureModel by least squares, per posture, from per-frame arrays (frames where the
+    person is seen and the reference posture is known)"""
+    Y = np.stack([top, med], 1)
+    coef, cov = np.zeros((len(POSTURES), 2, 2)), np.zeros((len(POSTURES), 2, 2))
+    for k in range(len(POSTURES)):
+        m = posture == k
+        A = np.stack([np.ones(m.sum()), offaxis[m]], 1)
+        coef[k] = np.linalg.lstsq(A, Y[m], rcond=None)[0]
+        cov[k] = np.atleast_2d(np.cov((Y[m] - A @ coef[k]).T))
+    return coef, cov
+
+
+def decode_postures(model, recordings):
+    """the most likely posture per frame (Viterbi) of each recording, all at once (vectorised over recordings).
+    recordings: list of (h_top, h_med, offaxis, moving) per-frame arrays (radar_height, radar_median_height,
+    radar_offaxis, radar_moving). Returns a list of (T,) posture codes."""
+    E_list = [model.log_emission(*r[:3]) for r in recordings]
+    K, M = len(POSTURES), max(int(round(model.d_min_s * FPS)), 2)
+    R = len(E_list)
+    L = np.array([len(e) for e in E_list])
+    T = L.max()
+    E = np.zeros((T, R, K))
+    G = np.zeros((T, R), bool)
+    for r, (e, rec) in enumerate(zip(E_list, recordings)):
+        E[:len(e), r] = e
+        G[:len(e), r] = np.asarray(rec[3])[:len(e)]
+    nb = np.log(ALLOWED.sum(1))
+    neg = -1e18
+    # state (k, j): posture k, j frames into its minimum duration; j = M - 1: past it (may end)
+    delta = np.full((R, K, M), neg)
+    delta[:, :, M - 1] = E[0] - np.log(K)
+    bp_entry = np.zeros((T, R, K), np.int32)    # previous posture of an entry into k
+    bp_tail = np.zeros((T, R, K), bool)         # past the minimum: reached from the chain (True) or stayed
+    ends = delta.copy()
+    rows = np.arange(R)
+    for t in range(1, T):
+        p = np.where(G[t], model.p_move, model.p_still)[:, None]
+        new = np.full((R, K, M), neg)
+        new[:, :, 1:M - 1] = delta[:, :, :M - 2]
+        a, s = delta[:, :, M - 2], delta[:, :, M - 1] + np.log1p(-p)
+        new[:, :, M - 1] = np.maximum(a, s)
+        bp_tail[t] = a > s
+        leave = delta[:, :, M - 1] + np.log(p) - nb[None, :]          # (R, K): leave posture k now
+        for k in range(K):
+            src = np.flatnonzero(ALLOWED[:, k])
+            best = src[leave[:, src].argmax(1)]
+            new[:, k, 0] = leave[rows, best]
+            bp_entry[t, :, k] = best
+        new += E[t][:, :, None]
+        new -= new.max((1, 2), keepdims=True)
+        delta = new
+        ends[L - 1 == t] = delta[L - 1 == t]
+    out = []
+    for r in range(R):
+        k, j = np.unravel_index(ends[r].argmax(), (K, M))
+        s = np.empty(L[r], int)
+        s[-1] = k
+        for t in range(L[r] - 1, 0, -1):
+            if j == 0:
+                k, j = int(bp_entry[t, r, k]), M - 1
+            elif j < M - 1 or bp_tail[t, r, k]:
+                j -= 1
+            s[t - 1] = k
+        out.append(s)
+    return out
+
+
+def radar_posture_models(path=None):
+    """{person: RadarPostureModel calibrated without that person, 'ALL': on every person}, from the latest run of
+    scripts/evaluate_category3.py (or `path`)"""
+    d = read_calibration('category3', POSTURE_MODEL_FILE, path)
+    return {r['person']: RadarPostureModel.from_row(r) for r in d.to_dict('records')}

@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
 from mobility.plots.transitions import transitions_figure  # noqa: E402
-from mobility.posture import posture_rules, radar_height, radar_offaxis, radar_posture_rules  # noqa: E402
+from mobility.posture import (decode_postures, posture_rules, radar_height, radar_median_height,  # noqa: E402
+                              radar_moving, radar_offaxis, radar_posture_models)
 from mobility.session import load_session  # noqa: E402
 from mobility.utils import fold_of  # noqa: E402
 
@@ -29,13 +30,15 @@ if __name__ == '__main__':
     with run('plot_transitions', args, partial=False) as run_dir:
         events = pd.read_csv(latest('category3', 'events.csv'), keep_default_na=False,
                              na_values=[''])
-        rules, radar_rules = posture_rules(), radar_posture_rules()
+        th = pd.read_csv(latest('category1', 'thresholds.csv')).set_index('rec')    # the movement gate
+        rules, models = posture_rules(), radar_posture_models()
         out = run_dir
         for rec in args.only or list(events.rec.unique()):
             s = load_session(*parse_recording(rec))
-            rule, radar_rule = fold_of(rules, s.person), fold_of(radar_rules, s.person)
-            h, off = radar_height(s), radar_offaxis(s)
+            rule, model = fold_of(rules, s.person), fold_of(models, s.person)
+            h = radar_height(s)
+            moving = radar_moving(s, th.loc[rec, 'radar_threshold'], th.loc[rec, 'active_feature'])
+            radar = decode_postures(model, [(h, radar_median_height(s), radar_offaxis(s), moving)])[0]
             path = os.path.join(out, f'{s.person}_{s.scenario}_transitions.png')
-            transitions_figure(s, rule.classify(s.mocap), radar_rule.classify(h, off), radar_rule.height(h, off),
-                               events[events.rec == rec], path)
+            transitions_figure(s, rule.classify(s.mocap), radar, h, events[events.rec == rec], path)
             print(path)

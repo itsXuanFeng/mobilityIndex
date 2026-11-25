@@ -26,16 +26,18 @@ from .category2 import (BOUT_MATCH_IOU, RADAR_CONFIRM_EPS, RADAR_CONFIRM_SPEEDS,
                         bout_events, bout_frame, bout_scores, evaluate_bouts, loso_radar_bout_levels,
                         loso_radar_untied_levels, match_bouts)
 from .category3 import (CLASSIFIERS, HAND_RULE_GRID, INNER_FOLDS, burst_classifier_fold,
-                        calibrate_height_rule, calibrate_peak, fit_burst_model, hand_rule_baseline, height_epochs,
+                        calibrate_height_rule, calibrate_peak, calibrate_posture_model, fit_burst_model,
+                        fit_model_emission, hand_rule_baseline, height_epochs, model_events, model_inputs,
                         peak_measures, peak_pairs, per_kind_table, posture_scores, prepare_recording, radar_events,
                         transition_events, transition_scores, window_filter)
 
 __all__ = [
     'agreement_with_baseline', 'bout_events', 'bout_frame', 'BOUT_MATCH_IOU', 'bout_scores', 'burst_classifier_fold',
-    'calibrate_height_rule', 'calibrate_peak', 'CLASSIFIERS', 'count_epoch_table', 'distance_residuals',
-    'energy_conversion', 'epoch_pairs', 'epoch_scores', 'epoch_table', 'evaluate_bouts', 'fit_burst_model',
+    'calibrate_height_rule', 'calibrate_peak', 'calibrate_posture_model', 'CLASSIFIERS', 'count_epoch_table', 'distance_residuals',
+    'energy_conversion', 'epoch_pairs', 'epoch_scores', 'epoch_table', 'evaluate_bouts', 'fit_burst_model', 'fit_model_emission',
     'hand_rule_baseline', 'HAND_RULE_GRID', 'height_epochs', 'INNER_FOLDS', 'loso_radar_bout_levels',
-    'loso_radar_untied_levels', 'loso_thresholds', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'paired_states',
+    'loso_radar_untied_levels', 'loso_thresholds', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'model_events',
+    'model_inputs', 'paired_states',
     'peak_measures', 'peak_pairs', 'per_kind_table', 'per_label', 'per_person', 'posture_scores',
     'prepare_recording', 'RADAR_CONFIRM_EPS', 'RADAR_CONFIRM_SPEEDS', 'radar_events', 'RADAR_EXIT_DELTAS',
     'RADAR_KAPPAS', 'set_bout_levels',

@@ -2,8 +2,7 @@
 Postural transitions of the radar and of MoCap over time (Category 3): the whole recording, and a close-up of the bed
 episode.
 
-Rows: the activity labels; the posture of both sensors (radar: from the height, carried forward while the person isn't
-seen); the transitions of each sensor (down = away from the radar, up = towards it; filled = matched to a transition of
+Rows: the activity labels; the posture of both sensors (radar: the posture model, mobility.posture.RadarPostureModel); the transitions of each sensor (down = away from the radar, up = towards it; filled = matched to a transition of
 the same kind of the other sensor, outlined = not); and the height: the radar's top of the body (dots, from the angle,
 also while the person is still) and the MoCap head.
 """
@@ -21,7 +20,7 @@ SHORT_KIND = {'sit_to_stand': 'stand up', 'stand_to_sit': 'sit down', 'lie_to_si
 
 LEGEND = [
     Line2D([], [], color=style.MOCAP, label='MoCap posture per frame (a change counts once held)'),
-    Line2D([], [], color=style.RADAR, label='radar posture per frame, from the height'),
+    Line2D([], [], color=style.RADAR, label='radar posture per frame (posture model)'),
     Line2D([], [], marker='v', linestyle='', color=style.MOCAP, label='MoCap transition (down / up)'),
     Line2D([], [], marker='v', linestyle='', color=style.RADAR, label='radar transition'),
     Line2D([], [], marker='v', linestyle='', markerfacecolor=style.SURFACE, color=style.INK_2,

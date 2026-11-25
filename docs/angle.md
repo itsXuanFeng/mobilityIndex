@@ -4,7 +4,7 @@
 
 **What it gives:**
 
-- the **height of the top of the body**, which decides posture ([Category 3](category3.md));
+- the **height of the person's body** (its top and its middle), from which posture is followed ([Category 3](category3.md));
 - **which reflections belong to the person**, so walls, furniture or other moving objects don't count towards their activity energy ([Category 1](category1.md));
 - the person's **position in the room**, for example near the bed or the chair.
 

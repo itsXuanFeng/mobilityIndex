@@ -4,9 +4,10 @@ with its time, kind, direction and peak radial speed.
 
 MoCap: the changes of the posture sequence (mobility.posture), once each posture has lasted min_hold_s.
 
-Radar, main method (with the angle): the same, on the radar posture sequence: the posture from the height of the top of
-the body (mobility.posture.RadarPostureRule), carried forward while the person isn't seen, transitions where it changes
-and holds (radar_posture_transitions). The same rule as for MoCap, so the two define a transition the same way.
+Radar, main method (with the angle): the same, on the radar posture sequence (radar_posture_transitions): the posture
+model (mobility.posture.RadarPostureModel) decodes the posture over time with the same minimum duration as the MoCap
+rule, so the two define a transition the same way. The height rule (mobility.posture.RadarPostureRule: thresholds on
+the top-of-body height, carried forward while unseen, changes that hold) is kept as a comparison.
 
 Radar, comparison (range and Doppler only, the first version; with or without the angle features), in four steps:
     1. bursts      runs of vertical motion of one sign: the signed Doppler centroid, smoothed over 0.5 s, beyond V_ON;
@@ -118,8 +119,8 @@ def mocap_transitions(session, rule):
 
 
 def radar_posture_transitions(t, posture, v_peak, min_hold_s):
-    """the radar transitions: changes of the radar posture per frame (RadarPostureRule.classify of radar_height),
-    held >= min_hold_s, with the radar peak radial speed (feature v_peak)"""
+    """the radar transitions: changes of the radar posture per frame (decoded by RadarPostureModel, or
+    RadarPostureRule.classify of radar_height), held >= min_hold_s, with the radar peak radial speed (feature v_peak)"""
     return add_peak(posture_transitions(t, posture, min_hold_s), t, v_peak)
 
 

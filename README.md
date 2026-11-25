@@ -52,7 +52,8 @@ mobility/                  the package
   labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
   bouts.py                 bout definition (hysteresis, confirmation, gap filling, minimum bout); its calibration;
                            bout matching
-  posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar height rule
+  posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar
+                           posture model (hidden semi-Markov; the height rule as a comparison)
   transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier and hand
                            rule (comparisons); event matching
   align.py                 time offset radar <-> MoCap, radar position and orientation fits
@@ -63,7 +64,7 @@ mobility/                  the package
     agreement.py           per recording: metrics of both sensors, agreement, no-sensor baseline (all categories)
     category1.py           per epoch: AUC, F1, radar thresholds; per person, per activity, per distance
     category2.py           bouts per epoch and per bout; the radar bout margin κ (one parameter)
-    category3.py           transitions per event, posture per epoch; height rule, peak quantile, comparison methods
+    category3.py           transitions per event, posture per epoch; posture model, height rule, peak quantile, comparisons
     personal.py            personal calibration on top of leave-one-subject-out
   plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, per_person.py,
                            sensitivity.py, angle.py, diagnostic.py; common.py and style.py shared

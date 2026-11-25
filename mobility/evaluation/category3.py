@@ -1,7 +1,9 @@
 """
 Category 3: postural transitions per event and posture per epoch, MoCap as the reference, and everything the radar
 calibrates for them leaving the evaluated person out (docs/category3.md):
-    height rule        thresholds, off-axis correction and hold of mobility.posture.RadarPostureRule
+    posture model      emission, evidence weight and change probability of mobility.posture.RadarPostureModel, the
+                       main method (calibrate_posture_model)
+    height rule        thresholds, off-axis correction and hold of mobility.posture.RadarPostureRule, a comparison
                        (calibrate_height_rule)
     peak Doppler       which power-weighted quantile of the person's speeds (calibrate_peak)
     comparisons        burst classifiers (burst_classifier_fold) and the hand rule (hand_rule_baseline)
@@ -14,10 +16,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, roc_auc_score
 
-from ..config import EPOCH_FRAMES
+from ..config import EPOCH_FRAMES, FPS
 from ..io.recordings import parse_recording
-from ..posture import (FLOOR, GRID_MIN_HOLD_S, GRID_OFFAXIS_K, LYING, POSTURES, SITTING, STANDING, UNKNOWN,
-                       RadarPostureRule, calibrate_radar_thresholds, epoch_posture, radar_height, radar_offaxis)
+from ..posture import (EMISSION_STEP, FLOOR, GRID_BETA, GRID_MIN_HOLD_S, GRID_OFFAXIS_K, GRID_P_MOVE, LYING, POSTURES,
+                       SITTING, STANDING, UNKNOWN, RadarPostureModel, RadarPostureRule, calibrate_radar_thresholds,
+                       decode_postures, epoch_posture, fit_posture_emission, radar_height, radar_median_height,
+                       radar_moving, radar_offaxis)
 from ..radar.angle import PEAK_FEATURES
 from ..session import load_session
 from ..transitions import (ANGLE_BURST_FEATURES, BURST_FEATURES, COUNTED, MATCH_TOL_S, NONE, BurstModel, add_peak,
@@ -109,30 +113,36 @@ def posture_scores(radar, mocap, height, valid):
 
 # ---- prepared recordings ----
 
-def prepare_recording(rec, mocap_rules):
+def prepare_recording(rec, mocap_rules, active):
     """
     one recording ('person_x/scenario_y') for the Category 3 evaluation, a dict of:
         rec, person
         t, window       frame times and the evaluation window per frame
         height, offaxis the radar's top-of-body height and distance from the axis per frame (smoothed)
+        height_med      the median height of the person's points per frame (smoothed)
+        moving          per frame: the person moves (Category 1 activity, active = (feature, threshold))
         speeds          per-frame radar speeds for the peak Doppler: v_peak and the quantiles PEAK_FEATURES
         valid_epoch     epochs inside the window
         bursts          the radar bursts (mobility.transitions.bursts), with in_window
         mocap           {MoCap posture rule: MoCap transitions inside the window}, for every rule in mocap_rules
         mocap_epoch     {MoCap posture rule: MoCap posture per epoch}
+        mocap_frame     {MoCap posture rule: MoCap posture per frame (int8)}
     """
     s = load_session(*parse_recording(rec))
     w = s.masks['window']
     b = bursts(s)
     b['in_window'] = w[np.clip(np.searchsorted(s.t, b.t.values), 0, len(s.t) - 1)]
     h, off = radar_height(s), radar_offaxis(s)
-    mocap, mocap_epoch = {}, {}
+    mocap, mocap_epoch, mocap_frame = {}, {}, {}
     for r in mocap_rules:
         mocap[r] = in_window(mocap_transitions(s, r), s.t, w)
-        mocap_epoch[r] = epoch_posture(r.classify(s.mocap), EPOCH_FRAMES)
+        frames = r.classify(s.mocap)
+        mocap_epoch[r] = epoch_posture(frames, EPOCH_FRAMES)
+        mocap_frame[r] = frames.astype(np.int8)
     speeds = {k: s.radar[k] for k in ('v_peak',) + PEAK_FEATURES}
-    return dict(rec=rec, person=s.person, t=s.t, window=w, height=h, offaxis=off, speeds=speeds,
-                valid_epoch=s.epoch_mask('window'), bursts=b, mocap=mocap, mocap_epoch=mocap_epoch)
+    return dict(rec=rec, person=s.person, t=s.t, window=w, height=h, offaxis=off, height_med=radar_median_height(s),
+                moving=radar_moving(s, active[1], active[0]), speeds=speeds, valid_epoch=s.epoch_mask('window'),
+                bursts=b, mocap=mocap, mocap_epoch=mocap_epoch, mocap_frame=mocap_frame)
 
 
 def window_filter(d):
@@ -145,7 +155,56 @@ def others(data, person):
     return [d for d in data.values() if d['person'] != person]
 
 
-# ---- main method: posture from height ----
+# ---- main method: the posture model ----
+
+def model_inputs(d):
+    """the per-frame inputs of RadarPostureModel for prepared recording d"""
+    return d['height'], d['height_med'], d['offaxis'], d['moving']
+
+
+def model_events(d, posture, speed='v_peak'):
+    """the radar transitions of prepared recording d from its decoded posture per frame (no hold beyond the model's
+    own minimum duration), inside its window; peak speed from the per-frame speed `speed`"""
+    return window_filter(d)(radar_posture_transitions(d['t'], posture, d['speeds'][speed], 1.0 / FPS))
+
+
+def fit_model_emission(recordings, mrule, step=EMISSION_STEP):
+    """(coef, cov) of RadarPostureModel on the prepared recordings: every `step`-th frame inside the window where the
+    radar sees the person and MoCap (under MoCap posture rule mrule) gives the posture"""
+    cols = [[], [], [], []]
+    for d in recordings:
+        p = d['mocap_frame'][mrule]
+        ok = d['window'] & ~np.isnan(d['height']) & ~np.isnan(d['height_med']) & (p != UNKNOWN)
+        ok[np.arange(len(ok)) % step != 0] = False
+        for c, x in zip(cols, (d['height'], d['height_med'], np.nan_to_num(d['offaxis']), p)):
+            c.append(np.asarray(x)[ok])
+    return fit_posture_emission(*(np.concatenate(c) for c in cols))
+
+
+def calibrate_posture_model(data, rule_of, person):
+    """(RadarPostureModel, training transition F1) calibrated on every person but `person` ('ALL' when None), with
+    MoCap under that person's MoCap posture rule: the emission fitted on their frames, the minimum posture duration
+    = that rule's min_hold_s, then beta and p_move with the best pooled transition F1 against MoCap. Ties: the first
+    in the grid."""
+    mrule = fold_of(rule_of, person)
+    train = others(data, person)
+    coef, cov = fit_model_emission(train, mrule)
+    base = RadarPostureModel(coef, cov, d_min_s=mrule.min_hold_s)
+    best = None
+    for beta, p_move in itertools.product(GRID_BETA, GRID_P_MOVE):
+        model = base.with_settings(beta, p_move)
+        hit = n = 0
+        for d, post in zip(train, decode_postures(model, [model_inputs(d) for d in train])):
+            radar, mocap = model_events(d, post), d['mocap'][mrule]
+            hit += len(match_events(mocap, radar))
+            n += len(mocap) + len(radar)
+        f1 = 2 * hit / n if n else 0.0
+        if best is None or f1 > best[1]:
+            best = (model, f1)
+    return best
+
+
+# ---- comparison: posture from height (the height rule) ----
 
 def radar_events(d, rule, posture=None, speed='v_peak'):
     """the radar transitions of prepared recording d under a RadarPostureRule, inside its window; peak speed from the

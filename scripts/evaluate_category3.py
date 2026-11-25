@@ -10,11 +10,16 @@ Run first:
 
 The calibration and scoring are in mobility/evaluation/category3.py; this script runs them and writes the tables.
 
-Main method: the radar posture from the height of the top of the body (mobility.posture.RadarPostureRule), and the
-transitions where it changes and holds, the same rule as for MoCap. For each person, on the *other* persons, with MoCap
-defined by that person's MoCap posture rule: for each off-axis correction offaxis_k, the three height thresholds
-maximise the balanced accuracy of their split per 1 s epoch against the MoCap posture; then offaxis_k and min_hold_s
-together maximise the transition F1 against MoCap.
+Main method: the posture model (mobility.posture.RadarPostureModel), a hidden semi-Markov model that follows the
+posture over time from the top and median height of the person's points; the transitions are the changes of the decoded
+posture. For each person, on the *other* persons, with MoCap defined by that person's MoCap posture rule: the emission
+(per posture, a Gaussian of the two heights whose mean moves with the distance from the radar axis) is fitted on their
+frames; the minimum posture duration is that MoCap rule's min_hold_s; the evidence weight beta and the change
+probability p_move maximise the pooled transition F1 against MoCap.
+
+Height rule (the previous main method, now a comparison): three thresholds on the top-of-body height
+(mobility.posture.RadarPostureRule), off-axis corrected, carried forward while unseen, transitions where it changes and
+holds. Its thresholds maximise the balanced accuracy per epoch, the off-axis correction and hold the transition F1.
 
 Peak Doppler: the radar speed of the person's moving points, at a power-weighted quantile (mobility.radar.angle,
 PEAK_QUANTILES) chosen for each person on the *other* persons: the one whose peak within 1 s of their MoCap
@@ -22,16 +27,21 @@ transitions is closest to the MoCap peak (mean absolute error). The fastest stro
 version) is reported next to it.
 
 Comparisons, also leave-one-subject-out:
+    height rule         see above (radar_posture_rule.csv; mobility/evaluation/personal.py builds on it)
     classifier          burst classifier on range and Doppler only (the first version, docs/category3.md)
     classifier+angle    the same with the angle burst features (height before / after, distance from the axis)
     hand rule           thresholds on burst speed, range change, duration (finds transitions, not their kind)
 
 Writes to its run folder, output/experiments/category3_<time>/:
-    radar_posture_rule.csv  per left-out person (and ALL): height thresholds, hold, training F1
+    radar_posture_model.csv per left-out person (and ALL): the posture model (emission per posture, beta, p_move,
+                            minimum posture duration), training transition F1
+    radar_posture_rule.csv  per left-out person (and ALL): height rule thresholds, hold, training F1
     peak_rule.csv           per left-out person (and ALL): the speed quantile used for the peak, its training MAE
     peak_measures.csv       per candidate peak measure, on the MoCap transitions: median, bias, MAE, MAE without the
                             bias (removed leaving the person out)
-    posture_scores.csv      per recording: F1 per posture, AUC of the height per pair of neighbouring postures, seen
+    posture_scores.csv      per recording, main method: F1 per posture, AUC of the height per pair of neighbouring
+                            postures, seen
+    posture_scores_height_rule.csv   the same for the height rule
     posture_confusion.csv   epochs, MoCap posture x radar posture, pooled
     event_scores.csv        per recording, main method: transitions, matched, precision, recall, F1, time, peak error
     events.csv              every transition of both sensors, main method
@@ -59,7 +69,8 @@ from mobility.cli import error_summary, parallel_map, wide_tables  # noqa: E402
 from mobility.config import EPOCH_FRAMES  # noqa: E402
 from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
-from mobility.posture import POSTURES, RADAR_POSTURE_RULE_FILE, UNKNOWN, epoch_posture, posture_rules  # noqa: E402
+from mobility.posture import (POSTURE_MODEL_FILE, POSTURES, RADAR_POSTURE_RULE_FILE, UNKNOWN, decode_postures,  # noqa: E402
+                              epoch_posture, posture_rules)
 from mobility.session import load_session  # noqa: E402
 from mobility.transitions import COUNTED  # noqa: E402
 from mobility.utils import fold_of, spread  # noqa: E402
@@ -72,11 +83,16 @@ DATA, RULE_OF, SCORED = {}, {}, set()
 def prepare(job):
     """one recording, in a worker: radar height, bursts, and the MoCap posture and transitions under every MoCap
     posture rule a fold may use"""
-    rec, rules = job
+    rec, rules, active = job
     try:
-        return ev.prepare_recording(rec, rules), None
+        return ev.prepare_recording(rec, rules, active), None
     except Exception:
         return None, f'{rec}: {error_summary()}'
+
+
+def run_posture_fold(person):
+    """the posture model calibrated without one person (None: on everyone), in a worker"""
+    return person, ev.calibrate_posture_model(DATA, RULE_OF, person)
 
 
 def run_fold(job):
@@ -112,7 +128,9 @@ if __name__ == '__main__':
         out = run_dir
         wide_tables(max_columns=30)
 
-        res = parallel_map(prepare, [(r, sorted(set(RULE_OF.values()), key=str)) for r in th.rec], args.workers)
+        mrules = sorted(set(RULE_OF.values()), key=str)
+        res = parallel_map(prepare, [(r.rec, mrules, (r.active_feature, r.radar_threshold)) for r in th.itertuples()],
+                           args.workers)
         failed = [e for _, e in res if e]
         if failed:
             print(f'{len(failed)} recordings FAILED and are left out:\n  ' + '\n  '.join(failed))
@@ -123,7 +141,21 @@ if __name__ == '__main__':
         print(f'{len(DATA)} recordings, {len(persons)} persons; radar sees the person in {100 * seen:.0f}% of the '
               f'evaluated frames', flush=True)
 
-        # ---- main method: height rule, leave-one-subject-out ----
+        # ---- main method: the posture model, leave-one-subject-out ----
+        model_of, model_rows = {}, []
+        for person, (model, f1) in parallel_map(run_posture_fold, persons + [None], args.fold_workers):
+            model_of[person or 'ALL'] = model
+            model_rows.append(dict(person=person or 'ALL', **model.row(), train_transition_f1=f1))
+        mr = pd.DataFrame(model_rows)
+        mr.to_csv(os.path.join(out, POSTURE_MODEL_FILE), index=False)
+        held = mr[mr.person != 'ALL']
+        print(f'posture model, all persons: {model_of["ALL"]}\n  leaving each person out: beta '
+              f'{held.beta.value_counts().to_dict()}, p_move {held.p_move.value_counts().to_dict()}, minimum posture '
+              f'{held.d_min_s.value_counts().to_dict()} s, sitting top {held.sitting_top_per_m.min():+.3f} to '
+              f'{held.sitting_top_per_m.max():+.3f} m per m off-axis; training transition F1 '
+              f'{held.train_transition_f1.min():.3f}-{held.train_transition_f1.max():.3f}', flush=True)
+
+        # ---- comparison: height rule, leave-one-subject-out ----
         rule_rows, height_rule = [], {}
         for person in persons + [None]:
             rule, f1 = ev.calibrate_height_rule(DATA, RULE_OF, person)
@@ -154,25 +186,38 @@ if __name__ == '__main__':
         print(f'peak measure, leaving each person out: {pr[pr.person != "ALL"].measure.value_counts().to_dict()}; '
               f'all persons: {peak_rule["ALL"][0]}', flush=True)
 
-        # ---- main method, per recording: posture per epoch and transitions ----
-        transitions, postures, posture_rows, confusion, scores, events = {}, {}, [], [], [], []
+        # ---- per recording: posture per epoch and transitions; main method and height rule ----
+        decoded = {}
+        for person in persons:
+            recs = [r for r in sorted(SCORED) if DATA[r]['person'] == person]
+            if recs:
+                decoded.update(zip(recs, decode_postures(model_of[person], [ev.model_inputs(DATA[r]) for r in recs])))
+        transitions, postures, posture_rows, rule_posture_rows, confusion, scores, events = {}, {}, [], [], [], [], []
         for r in sorted(SCORED):
             d = DATA[r]
-            rule, mrule = height_rule[d['person']], RULE_OF[d['person']]
-            frames = rule.classify(d['height'], d['offaxis'])
-            radar, mocap = ev.radar_events(d, rule, frames, peak_rule[d['person']][0]), d['mocap'][mrule]
-            rp, mp = epoch_posture(frames, EPOCH_FRAMES), d['mocap_epoch'][mrule]
+            rule, mrule, speed = height_rule[d['person']], RULE_OF[d['person']], peak_rule[d['person']][0]
+            mocap, mp = d['mocap'][mrule], d['mocap_epoch'][mrule]
+            radar = ev.model_events(d, decoded[r], speed)
+            rp = epoch_posture(decoded[r], EPOCH_FRAMES)
             E = min(len(rp), len(mp), len(d['valid_epoch']))
+            h = ev.height_epochs(d, rule)[:E]
             transitions[r], postures[r] = (radar, mocap), (rp, mp)
-            posture_rows.append(dict(rec=r, **ev.posture_scores(rp[:E], mp[:E], ev.height_epochs(d, rule)[:E],
-                                                                d['valid_epoch'][:E])))
+            posture_rows.append(dict(rec=r, **ev.posture_scores(rp[:E], mp[:E], h, d['valid_epoch'][:E])))
             v = d['valid_epoch'][:E] & (mp[:E] != UNKNOWN)
             confusion.append(pd.crosstab(pd.Series(mp[:E][v], name='mocap'), pd.Series(rp[:E][v], name='radar')))
-            scores.append(dict(rec=r, method='height rule', **ev.transition_scores(radar, mocap)))
+            scores.append(dict(rec=r, method='posture model', **ev.transition_scores(radar, mocap)))
             events.append(ev.transition_events(radar, mocap, d['t'][0]).assign(rec=r))
+            # comparison: the height rule
+            frames = rule.classify(d['height'], d['offaxis'])
+            hp = epoch_posture(frames, EPOCH_FRAMES)
+            rule_posture_rows.append(dict(rec=r, **ev.posture_scores(hp[:E], mp[:E], h, d['valid_epoch'][:E])))
+            scores.append(dict(rec=r, method='height rule',
+                               **ev.transition_scores(ev.radar_events(d, rule, frames, speed), mocap)))
 
         ps = pd.DataFrame(posture_rows)
         ps.to_csv(f'{out}/posture_scores.csv', index=False)
+        hps = pd.DataFrame(rule_posture_rows)
+        hps.to_csv(f'{out}/posture_scores_height_rule.csv', index=False)
         conf = sum(c.reindex(index=range(4), columns=[UNKNOWN, 0, 1, 2, 3], fill_value=0) for c in confusion)
         conf.index = [POSTURES[i] for i in conf.index]
         conf.columns = ['unknown'] + list(POSTURES)
@@ -182,6 +227,8 @@ if __name__ == '__main__':
         for c in [c for c in ps.columns if c.startswith(('f1_', 'auc_'))]:
             print(f'  {c:24s} {spread(ps[c])}')
         print(f'pooled epochs, MoCap (rows) x radar (columns):\n{conf.to_string()}')
+        print(f'height rule (comparison): mean F1 {spread(hps.f1_mean)}; ' + ', '.join(
+            f'{c[3:]} {spread(hps[c])}' for c in hps.columns if c.startswith('f1_') and c != 'f1_mean'))
 
         # ---- comparisons: classifiers and the hand rule ----
         folds = parallel_map(run_fold, [(p, m) for m in ev.CLASSIFIERS for p in persons], args.fold_workers)
@@ -195,7 +242,7 @@ if __name__ == '__main__':
         # ---- per event ----
         sc = pd.DataFrame(scores)
         sc.to_csv(f'{out}/methods.csv', index=False)
-        main = sc[sc.method == 'height rule'].drop(columns='method')
+        main = sc[sc.method == 'posture model'].drop(columns='method')
         main.to_csv(f'{out}/event_scores.csv', index=False)
         events = pd.concat(events, ignore_index=True)
         events.to_csv(f'{out}/events.csv', index=False)
@@ -203,13 +250,14 @@ if __name__ == '__main__':
         for m, g in sc.groupby('method', sort=False):
             print(f'  {m:17s} same kind F1 {spread(g.f1)}, precision {spread(g.precision)}, recall {spread(g.recall)}; '
                   f'any kind F1 {spread(g.f1_any)}; pooled {g.matched.sum()} matched of {g.mocap_events.sum()} MoCap, '
-                  f'{g.radar_events.sum()} radar')
+                  f'{g.radar_events.sum()} radar (pooled F1 '
+                  f'{2 * g.matched.sum() / (g.mocap_events.sum() + g.radar_events.sum()):.3f})')
         print(f'  {"hand rule":17s} any kind F1 {spread(base.f1_any)}')
-        print(f'  height rule, matched: time error {spread(main.time_mae_s, ".2f")} s, peak speed error '
+        print(f'  posture model, matched: time error {spread(main.time_mae_s, ".2f")} s, peak speed error '
               f'{spread(main.peak_mae, ".2f")} m/s (per-recording MAE)')
         per_kind = ev.per_kind_table(events)
         per_kind.to_csv(f'{out}/per_kind.csv', index=False)
-        print(f'\nheight rule, per kind, pooled (as_<kind>: radar kind of the MoCap transitions, by time only):\n'
+        print(f'\nposture model, per kind, pooled (as_<kind>: radar kind of the MoCap transitions, by time only):\n'
               f'{per_kind.round(3).to_string(index=False)}')
         m = events[(events.source == 'mocap') & events.kind.isin(COUNTED)]
         off = m.groupby(pd.cut(m.offaxis_m, [0, 0.5, 1.0, 1.5, 2.0, 3.0, 6.0])).matched.agg(['size', 'mean'])
@@ -227,6 +275,6 @@ if __name__ == '__main__':
         # constant offset could be calibrated away: mae_bias_removed, after removing the other persons' mean bias
         agreement = ev.agreement_with_baseline(mt, bias_removed=True)
         agreement.to_csv(f'{out}/agreement.csv', index=False)
-        print(f'\nper-recording metrics (height rule):\n{agreement.round(3).to_string(index=False)}')
+        print(f'\nper-recording metrics (posture model):\n{agreement.round(3).to_string(index=False)}')
         for k, g in mt.groupby('metric', sort=False):
             print(f'  {k:24s} MoCap {spread(g.mocap, ".2f")}  radar {spread(g.radar, ".2f")}')

@@ -1,11 +1,11 @@
 """
 Category 3: postural transitions, and the time in each posture. See docs/category3.md.
 
-Posture times read the posture per epoch in States.posture (MoCap: the calibrated MoCap rule; radar: the height rule,
-mobility.posture.RadarPostureRule), over the valid epochs where the posture is known.
+Posture times read the posture per epoch in States.posture (MoCap: the calibrated MoCap rule; radar: the posture model,
+mobility.posture.RadarPostureModel), over the valid epochs where the posture is known.
 
 The metrics read the transition events in States.transitions (mobility.transitions: MoCap from the calibrated posture
-rule, radar from the height rule; mobility.evaluation.metric_table sets them) and count only those inside the
+rule, radar from the posture model; mobility.evaluation.metric_table sets them) and count only those inside the
 valid epochs, which are the same on both sides.
 
 Peak transition Doppler is the mean, over the recording's counted transitions (sit-to-stand, stand-to-sit,

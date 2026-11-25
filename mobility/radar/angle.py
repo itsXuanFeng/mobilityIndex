@@ -143,10 +143,11 @@ STRONG_DB = 12             # dB above the floor: clearly visible points, as for 
 PERSON_RADIUS_M = 1.0      # points this close (horizontally) to the frame's centre belong to the person
 MIN_PERSON_POINTS = 3      # fewer: the person isn't seen in the frame
 TOP_QUANTILE = 0.9         # top of the body: this quantile of the person's point heights (robust to stray points)
+MED_QUANTILE = 0.5         # middle of the body: the median height of the person's points (lying in bed vs on the floor)
 # peak Doppler: power-weighted quantiles of the person's moving speeds; which one is calibrated against MoCap
 PEAK_QUANTILES = (0.9, 0.95, 0.98, 0.99, 0.995)
 PEAK_FEATURES = tuple(f'v_q{round(q * 1000)}' for q in PEAK_QUANTILES)
-ANGLE_FEATURES = ('h_top', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body', 'v_horiz', 'e_move'
+ANGLE_FEATURES = ('h_top', 'h_med', 'x_person', 'z_person', 'n_person', 'n_slow', 'e_body', 'v_horiz', 'e_move'
                   ) + PEAK_FEATURES
 
 
@@ -167,6 +168,8 @@ def frame_features(points, floor_db, n_frames):
     per frame, from the angle-pass points, the person as the radar sees them, whether moving or not (the slow Doppler
     bins hold breathing and small movements, so a still person is usually visible):
         h_top       height of the top of the body (m): TOP_QUANTILE of the heights of the person's points
+        h_med       median height of the person's points (m): the middle of the body; separates lying in bed from
+                    lying on the floor, where the top of the body barely differs (docs/category3.md)
         x_person, z_person   position of the person (m, MoCap frame): median of all clearly visible points
         n_person    number of the person's points;  n_slow: of them, slower than MIN_SPEED (still)
         e_body      movement energy of the person (m^2/s^2): mean squared radial speed over all their points, still
@@ -205,6 +208,7 @@ def frame_features(points, floor_db, n_frames):
     out['n_slow'][f] = g.slow.sum().loc[f].values
     out['e_body'][f] = (person.speed ** 2).groupby(person.frame).mean().loc[f].values
     out['h_top'][f] = g.y.quantile(TOP_QUANTILE).loc[f].values
+    out['h_med'][f] = g.y.quantile(MED_QUANTILE).loc[f].values
     out['x_person'][f] = centre.x.loc[f].values
     out['z_person'][f] = centre.z.loc[f].values
     out['v_horiz'] = horizontal_speed(out['x_person'], out['z_person'], FPS)
