@@ -3,7 +3,8 @@ Activity bouts of the radar and of MoCap over time (Category 2): the whole recor
 episode, where most bouts disagree.
 
 Per sensor, one row: its bouts as bars (solid = matched to a bout of the other sensor, outline = unmatched) above its
-Category 1 active epochs (grey ticks), before the hysteresis, the confirmation and the bout rule.
+active epochs (grey ticks: above the entry threshold, before the hysteresis, the confirmation and the bout rule), and
+its posture transitions (black triangles), which confirm a bout too.
 """
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,14 +19,18 @@ LEGEND = [
     Patch(facecolor=style.MOCAP, label='MoCap bout, matched'),
     Patch(facecolor=style.RADAR, label='radar bout, matched'),
     Patch(facecolor=style.SURFACE, edgecolor=style.INK_2, label='bout without a match (outline)'),
-    Patch(facecolor=style.ACTIVE, label='active epoch (Category 1), before hysteresis, confirmation, rule'),
+    Patch(facecolor=style.ACTIVE, label='active epoch (entry), before hysteresis, confirmation, rule'),
+    plt.Line2D([], [], color=style.INK, marker='v', linestyle='', markersize=5, label='posture transition'),
     Patch(facecolor=style.SURFACE, edgecolor=style.HATCH, hatch='////', label='not evaluated'),
 ]
 
 
-def _bout_row(ax, x, width, active, bouts, matched, colour, label):
+def _bout_row(ax, x, width, active, bouts, matched, colour, label, transitions=None):
     for i in np.flatnonzero(active):
         ax.add_patch(plt.Rectangle((x[i], 0.05), width, 0.25, facecolor=style.ACTIVE, linewidth=0))
+    if transitions is not None and transitions.any():
+        i = np.flatnonzero(transitions)
+        ax.plot(x[i] + width / 2, np.full(len(i), 1.05), 'v', color=style.INK, markersize=4, clip_on=False)
     for k, (s, e) in enumerate(bouts):
         x0, w = x[s], x[e - 1] + width - x[s]
         if k in matched:
@@ -43,11 +48,12 @@ def _rows(axes, session, pairs, t0, scale, names_until=None):
     m = match_bouts(mb, rb)
     label_spans(axes[0], session.labels, t0, scale, names_until)
     strip_axes(axes[0], 'activity\nlabel')
-    for ax, act, b, matched, colour, label in (
-            (axes[1], pairs.mocap_active.values & pairs.evaluated.values, mb, set(m), style.MOCAP, 'MoCap'),
-            (axes[2], pairs.radar_active.values & pairs.evaluated.values, rb, set(m.values()), style.RADAR, 'radar')):
-        hatch_unevaluated(ax, x, w, pairs.evaluated.values)
-        _bout_row(ax, x, w, act, b, matched, colour, label)
+    ev = pairs.evaluated.values
+    for ax, src, b, matched, colour, label in ((axes[1], 'mocap', mb, set(m), style.MOCAP, 'MoCap'),
+                                               (axes[2], 'radar', rb, set(m.values()), style.RADAR, 'radar')):
+        hatch_unevaluated(ax, x, w, ev)
+        tr = pairs[f'{src}_transition'].values & ev if f'{src}_transition' in pairs else None
+        _bout_row(ax, x, w, pairs[f'{src}_active'].values & ev, b, matched, colour, label, tr)
     for ax in axes:
         ax.set_xlim(x[0], x[-1] + w)
     return len(mb), len(rb), len(m)

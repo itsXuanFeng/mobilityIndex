@@ -1,23 +1,28 @@
 """
 Activity bouts from a per-epoch activity level (Category 2). The same steps are applied to the radar and to MoCap:
-    1. hysteresis on the level: an epoch above the entry threshold (the Category 1 active threshold) starts activity,
-       which lasts while the level stays above a lower exit threshold;
+    1. hysteresis on the level: an epoch above the entry threshold starts activity, which lasts while the level stays
+       above a lower exit threshold;
     2. confirmation: a run of activity counts only if its level exceeds a higher confirmation threshold at least once
-       (drops weak movements, such as arm movements, that just cross the entry threshold). The run keeps its start at
-       the entry threshold. Optionally (radar only) the run must also reach a confirmation speed: its per-epoch Doppler
-       speed (States.extra['speed'], SPEED_FEATURE) exceeds confirm_speed at least once;
+       (drops weak movements, such as arm movements, that just cross the entry threshold), or if it contains a posture
+       transition of the same sensor (Category 3: a change of posture is a whole-body movement, even when the level
+       stays low, as when sitting up under a blanket). The run keeps its start at the entry threshold. Optionally
+       (radar only) a level-confirmed run must also reach a confirmation speed: its per-epoch Doppler speed
+       (States.extra['speed'], SPEED_FEATURE) exceeds confirm_speed at least once;
     3. gaps: inactive runs of at most max_gap epochs between two active runs are filled;
     4. minimum bout: active runs shorter than min_bout epochs (after 3) are dropped.
-Each step uses only past epochs; online, a bout is known once it is confirmed, and dated back to its start.
+Each step uses only past epochs; online, a bout is known once it is confirmed, and dated back to its start (a
+transition is known once the posture model has decided it, see docs/category3.md).
 Epochs outside the evaluation window (valid = False) end a bout: a bout never spans them and no gap is filled across
 them. A bout cut by the window edge counts, with the part inside the window.
 
-Nothing is set by hand. For MoCap, the exit and confirmation thresholds (factors x the entry threshold), max_gap and
-min_bout are calibrated together against the activity labels, leaving the evaluated person out
-(scripts/calibrate_bout_rule.py): the combination that, applied to the MoCap joint speed, best separates active from
-inactive label epochs (balanced accuracy). The radar uses one margin kappa on its log10 level, the same below and above
-the entry (exit = entry - kappa, confirmation = entry + kappa), calibrated against the MoCap bout count, also leaving
-the person out (mobility.evaluation.loso_radar_bout_levels); with the speed option, kappa and confirm_speed together.
+Nothing is set by hand. For MoCap, the entry is the Category 1 active threshold, and the exit and confirmation
+thresholds (factors x the entry), max_gap and min_bout are calibrated together against the activity labels, leaving
+the evaluated person out (scripts/calibrate_bout_rule.py): the combination that, applied to the MoCap joint speed with
+the MoCap posture transitions, best separates active from inactive label epochs (balanced accuracy). The radar level
+is corrected for the distance to the person (mobility.states.distance_corrected; its entry threshold calibrated on the
+corrected level as the Category 1 threshold is), and uses one margin kappa on it, the same below and above the entry
+(exit = entry - kappa, confirmation = entry + kappa), calibrated against the MoCap bout count, also leaving the person
+out (mobility.evaluation.loso_radar_bout_levels); with the speed option, kappa and confirm_speed together.
 
 Radar and MoCap bouts are compared one to one (match_bouts), by intersection over union.
 """
@@ -56,11 +61,12 @@ def _level(level):
     return np.nan_to_num(np.asarray(level, float), nan=-np.inf)
 
 
-def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None, speed=None, confirm_speed=None):
+def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None, speed=None, confirm_speed=None,
+               transition=None):
     """(E,) bool: active from an epoch that is `active` (above the entry threshold) for as long as the level stays
     above exit_threshold (at most the entry threshold); an invalid epoch ends it. With exit_threshold equal to the
-    entry threshold, this is `active` itself. With confirm_threshold: only the confirmed runs (confirmed), with
-    confirm_speed also on speed."""
+    entry threshold, this is `active` itself. With confirm_threshold: only the confirmed runs (confirmed; with
+    confirm_speed also on speed, with transition also by a posture transition)."""
     valid = np.asarray(valid, bool)
     start = np.asarray(active, bool) & valid
     above = valid & (_level(level) > exit_threshold)
@@ -70,18 +76,34 @@ def hysteresis(active, level, valid, exit_threshold, confirm_threshold=None, spe
         if len(h):
             out[s + h[0]:e] = True
     out |= start
-    return out if confirm_threshold is None else confirmed(out, level, confirm_threshold, speed, confirm_speed)
+    return out if confirm_threshold is None else confirmed(out, level, confirm_threshold, speed, confirm_speed,
+                                                           transition)
 
 
-def confirmed(active, level, confirm_threshold, speed=None, confirm_speed=None):
-    """(E,) bool: the runs of `active` whose level exceeds confirm_threshold at least once; with confirm_speed (not
-    None), whose speed (per epoch, m/s) also exceeds confirm_speed at least once (not necessarily in the same epoch)"""
+def confirmed(active, level, confirm_threshold, speed=None, confirm_speed=None, transition=None):
+    """(E,) bool: the runs of `active` whose level exceeds confirm_threshold at least once (with confirm_speed, not
+    None: whose speed, per epoch in m/s, also exceeds confirm_speed at least once, not necessarily in the same epoch),
+    or, with transition ((E,) bool: the epoch contains a posture transition, transition_epochs), that contain a
+    posture transition"""
     out = np.asarray(active, bool).copy()
     lv = _level(level)
     sp = None if confirm_speed is None else np.nan_to_num(np.asarray(speed, float), nan=0.0)
+    tr = None if transition is None else np.asarray(transition, bool)
     for s, e in runs(out):
-        if lv[s:e].max() <= confirm_threshold or (sp is not None and sp[s:e].max() <= confirm_speed):
+        by_level = lv[s:e].max() > confirm_threshold and (sp is None or sp[s:e].max() > confirm_speed)
+        if not by_level and not (tr is not None and tr[s:e].any()):
             out[s:e] = False
+    return out
+
+
+def transition_epochs(t, times, epoch_s):
+    """(E,) bool: the epoch (start times t, epoch_s long) contains one of the event times (posture transitions)"""
+    t = np.asarray(t, float)
+    out = np.zeros(len(t), bool)
+    times = np.asarray(times, float)
+    i = np.searchsorted(t, times, side='right') - 1
+    ok = (i >= 0) & (times < t[np.clip(i, 0, None)] + epoch_s)
+    out[i[ok]] = True
     return out
 
 
@@ -106,11 +128,13 @@ def bouts(active, valid, rule):
     return runs(in_bouts(active, valid, rule))
 
 
-def level_bouts(level, valid, entry, exit_threshold, confirm_threshold, rule, speed=None, confirm_speed=None):
+def level_bouts(level, valid, entry, exit_threshold, confirm_threshold, rule, speed=None, confirm_speed=None,
+                transition=None):
     """(n, 2) [start, end) epoch indices of the bouts of an activity level: active above the entry threshold, then
-    hysteresis, confirmation (on the level; with confirm_speed also on speed) and the bout rule"""
-    return bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold, speed, confirm_speed),
-                 valid, rule)
+    hysteresis, confirmation (on the level, with confirm_speed also on speed; or by a posture transition) and the bout
+    rule"""
+    return bouts(hysteresis(level > entry, level, valid, exit_threshold, confirm_threshold, speed, confirm_speed,
+                            transition), valid, rule)
 
 
 def match_bouts(ref, est, min_iou=BOUT_MATCH_IOU):
@@ -144,12 +168,14 @@ def transition_probability(active, valid):
 
 # ---- calibration against the activity labels ----
 
-def rule_confusion(epochs, thresholds, grid_gap=GRID_GAP, grid_min_bout=GRID_MIN_BOUT, grid_exit=GRID_EXIT,
-                   grid_confirm=GRID_CONFIRM):
+def rule_confusion(epochs, thresholds, transitions=None, grid_gap=GRID_GAP, grid_min_bout=GRID_MIN_BOUT,
+                   grid_exit=GRID_EXIT, grid_confirm=GRID_CONFIRM):
     """for every recording in epochs (mocap_epochs.csv: person, scenario, t, speed, cls), every candidate (exit
     factor, confirmation factor, max_gap, min_bout) and every fold threshold in thresholds ({left-out person: MoCap
-    active threshold}): counts of label epochs (active / inactive class) inside and outside bouts. One row per (fold,
-    person, scenario, exit_factor, confirm_factor, max_gap, min_bout)."""
+    active threshold}): counts of label epochs (active / inactive class) inside and outside bouts. With transitions
+    ({(person, scenario): {fold: (E,) bool, epochs of the recording with a MoCap posture transition under that fold's
+    posture rule}}), a run with a transition is confirmed too. One row per (fold, person, scenario, exit_factor,
+    confirm_factor, max_gap, min_bout)."""
     rows = []
     for (person, scenario), g in epochs.groupby(['person', 'scenario'], sort=False):
         g = g.sort_values('t')
@@ -159,13 +185,14 @@ def rule_confusion(epochs, thresholds, grid_gap=GRID_GAP, grid_min_bout=GRID_MIN
         done = {}                                # fold thresholds barely differ: most give the same sequence
         for fold, thr in thresholds.items():
             active = valid & (np.nan_to_num(speed) > thr)
-            key = active.tobytes()
+            tr = None if transitions is None else transitions[(person, scenario)][fold]
+            key = active.tobytes() + (b'' if tr is None else tr.tobytes())
             if key not in done:
                 done[key] = []
                 for f in grid_exit:
                     h = hysteresis(active, speed, valid, f * thr)
                     for c in grid_confirm:
-                        hc = confirmed(h, speed, c * thr)
+                        hc = confirmed(h, speed, c * thr, transition=tr)
                         for gap in grid_gap:
                             for mb in grid_min_bout:
                                 b = in_bouts(hc, valid, BoutRule(gap, mb))

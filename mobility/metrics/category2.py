@@ -2,11 +2,13 @@
 Category 2: activity bout structure. See docs/category2.md.
 
 All four metrics come from the activity level of mobility.states.States, so radar and MoCap get the same steps
-(mobility.bouts): hysteresis on the level, from the Category 1 active threshold down to the exit threshold in
+(mobility.bouts): hysteresis on the level, from the entry threshold (States.active; for the radar on the
+distance-corrected level, mobility.states.distance_corrected) down to the exit threshold in
 States.extra['exit_threshold']; confirmation, keeping the runs that exceed States.extra['confirm_threshold'] (and, if
-States.extra['confirm_speed'] is set, radar only, whose speed States.extra['speed'] exceeds it); then the bout rule in
-States.extra['bout_rule'] (gap filling, minimum bout). All are calibrated without the evaluated person;
-mobility.evaluation.metric_table sets them (set_bout_levels).
+States.extra['confirm_speed'] is set, radar only, whose speed States.extra['speed'] exceeds it) or that contain one of
+the sensor's own posture transitions (States.extra['bout_transitions'], per epoch; set_bout_transitions); then the bout
+rule in States.extra['bout_rule'] (gap filling, minimum bout). All are calibrated without the evaluated person;
+mobility.evaluation sets them (set_bout_levels, set_bout_transitions).
 
 The fragmentation index is the non-bout -> bout transition probability: how often rest is interrupted by a new bout,
 about 1 / mean rest between bouts. The other direction, bout -> non-bout, would be about 1 / mean bout duration and
@@ -14,7 +16,7 @@ would repeat bout_duration_mean.
 """
 import numpy as np
 
-from ..bouts import hysteresis, in_bouts, transition_probability
+from ..bouts import hysteresis, in_bouts, transition_epochs, transition_probability
 from ..utils import runs
 from . import metric
 
@@ -26,6 +28,14 @@ def set_bout_levels(rs, ms, radar, mocap, radar_confirm_speed=None):
     rs.extra['exit_threshold'], rs.extra['confirm_threshold'] = radar
     ms.extra['exit_threshold'], ms.extra['confirm_threshold'] = mocap
     rs.extra['confirm_speed'], ms.extra['confirm_speed'] = radar_confirm_speed, None
+
+
+def set_bout_transitions(rs, ms, radar_times, mocap_times):
+    """the posture transitions that confirm a bout, per epoch, each sensor its own (Category 3: radar posture model,
+    MoCap posture rule): event times (s) of the radar and of MoCap; None for a sensor leaves its bouts confirmed by
+    the level only"""
+    for s, times in ((rs, radar_times), (ms, mocap_times)):
+        s.extra['bout_transitions'] = None if times is None else transition_epochs(s.t, times, s.epoch_s)
 
 
 def _need(s, key):
@@ -40,7 +50,7 @@ def bout_activity(s):
     if c is not None and s.extra.get('speed') is None:
         raise ValueError("a confirmation speed needs States.extra['speed'] (mobility.states.radar_states)")
     return hysteresis(s.active, s.level, s.valid, _need(s, 'exit_threshold'), _need(s, 'confirm_threshold'),
-                      s.extra.get('speed'), c)
+                      s.extra.get('speed'), c, s.extra.get('bout_transitions'))
 
 
 def in_bout(s):

@@ -6,8 +6,8 @@ Radar vs MoCap, MoCap as the reference:
                    out
     category1.py   per epoch: AUC, and F1 with radar thresholds calibrated leave-one-subject-out; per person, per
                    scripted activity, per distance
-    category2.py   bouts per epoch (inside a bout or not) and per bout (matched between radar and MoCap); the radar exit
-                   and confirmation thresholds
+    category2.py   bouts per epoch (inside a bout or not) and per bout (matched between radar and MoCap), in bed and out
+                   of bed; the radar bout definition: distance slope, entry threshold, margin kappa
     category3.py   postural transitions per event, posture per epoch; the radar height rule, peak Doppler quantile and
                    the comparison methods
 
@@ -17,14 +17,14 @@ and for training the radar threshold on the other persons' recordings.
 
 Everything is importable from mobility.evaluation directly.
 """
-from ..metrics.category2 import set_bout_levels
+from ..metrics.category2 import set_bout_levels, set_bout_transitions
 from .agreement import (agreement_with_baseline, energy_conversion, metric_agreement, metric_rows,
                         metric_table, paired_states)
 from .category1 import (count_epoch_table, distance_residuals, epoch_pairs, epoch_scores, epoch_table,
                         loso_thresholds, per_label, per_person)
-from .category2 import (BOUT_MATCH_IOU, RADAR_CONFIRM_EPS, RADAR_CONFIRM_SPEEDS, RADAR_EXIT_DELTAS, RADAR_KAPPAS,
-                        bout_events, bout_frame, bout_scores, evaluate_bouts, loso_radar_bout_levels,
-                        loso_radar_untied_levels, match_bouts)
+from .category2 import (BOUT_MATCH_IOU, RADAR_CONFIRM_SPEEDS, RADAR_KAPPAS, bout_events, bout_frame, bout_scores,
+                        evaluate_bouts, lying_epochs, loso_corrected_entries, loso_distance_slopes,
+                        loso_radar_bout_levels, match_bouts, posture_events, split_metric_rows)
 from .category3 import (CLASSIFIERS, HAND_RULE_GRID, INNER_FOLDS, burst_classifier_fold,
                         calibrate_height_rule, calibrate_peak, calibrate_posture_model, fit_burst_model,
                         fit_model_emission, hand_rule_baseline, height_epochs, model_events, model_inputs,
@@ -35,11 +35,11 @@ __all__ = [
     'agreement_with_baseline', 'bout_events', 'bout_frame', 'BOUT_MATCH_IOU', 'bout_scores', 'burst_classifier_fold',
     'calibrate_height_rule', 'calibrate_peak', 'calibrate_posture_model', 'CLASSIFIERS', 'count_epoch_table', 'distance_residuals',
     'energy_conversion', 'epoch_pairs', 'epoch_scores', 'epoch_table', 'evaluate_bouts', 'fit_burst_model', 'fit_model_emission',
-    'hand_rule_baseline', 'HAND_RULE_GRID', 'height_epochs', 'INNER_FOLDS', 'loso_radar_bout_levels',
-    'loso_radar_untied_levels', 'loso_thresholds', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'model_events',
+    'hand_rule_baseline', 'HAND_RULE_GRID', 'height_epochs', 'INNER_FOLDS', 'loso_corrected_entries',
+    'loso_distance_slopes', 'loso_radar_bout_levels', 'loso_thresholds', 'lying_epochs', 'match_bouts', 'metric_agreement', 'metric_rows', 'metric_table', 'model_events',
     'model_inputs', 'paired_states',
     'peak_measures', 'peak_pairs', 'per_kind_table', 'per_label', 'per_person', 'posture_scores',
-    'prepare_recording', 'RADAR_CONFIRM_EPS', 'RADAR_CONFIRM_SPEEDS', 'radar_events', 'RADAR_EXIT_DELTAS',
-    'RADAR_KAPPAS', 'set_bout_levels',
+    'posture_events', 'prepare_recording', 'RADAR_CONFIRM_SPEEDS', 'radar_events', 'RADAR_KAPPAS', 'set_bout_levels',
+    'set_bout_transitions', 'split_metric_rows',
     'transition_events', 'transition_scores', 'window_filter',
 ]

@@ -26,7 +26,11 @@ Personal parameters:
                  energy conversion factor   C: LOSO + w_own x (the person's other recordings - LOSO); A and B: LOSO
                                                (so B's energy equals A's: the clip has no energy reference)
     Category 2   radar entry                the Category 1 radar threshold of the setup
-                 radar exit delta, confirmation eps   C: the person's other recordings (as loso_radar_untied_levels)
+                 radar exit delta, confirmation eps   C: the person's other recordings (separate margins, the
+                                               definition until 2026-11-21)
+                 Not yet updated to the Category 2 definition of 2026-11-25 (distance-corrected level, its own entry,
+                 posture transitions confirming a bout): this part still uses the uncorrected level, the Category 1
+                 entry and no transitions, with the kappa of category2/rules.csv as delta = eps.
     Category 3   h_stand                    B: LOSO + clip shift; C: LOSO + w x (the person's other recordings against
                                                MoCap - LOSO), w calibrated as the other weights
                  h_sit, h_floor             B and C: LOSO + clip shift
@@ -48,7 +52,7 @@ from ..states import States
 from ..transitions import in_window, mocap_transitions
 from ..utils import best_threshold, epoch_mean
 from .agreement import metric_rows, paired_states
-from .category2 import RADAR_CONFIRM_EPS, RADAR_EXIT_DELTAS, bout_events, bout_frame, bout_scores
+from .category2 import bout_events, bout_frame, bout_scores
 from .category3 import posture_scores, radar_events, transition_scores
 
 SETUPS = ('A', 'B', 'C')
@@ -65,6 +69,9 @@ CLIP_STAND_OFFAXIS_M = 2.0    # Category 3 standing level: walking within this o
 CLIP_MARGIN_S = LABEL_MARGIN_S
 SHRINK_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 CLIP_POSTURES = (STANDING, SITTING, LYING)
+# Category 2, setup C: separate radar exit and confirmation margins (entry - delta, entry + eps)
+RADAR_EXIT_DELTAS = (0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2)
+RADAR_CONFIRM_EPS = (0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0)
 
 
 # ---- the clip ----
@@ -225,9 +232,9 @@ def active_time_error(d, thr, mocap_thr):
 
 def person_bout_levels(recs, entry, mocap_entry, mocap_factors, rule, deltas=RADAR_EXIT_DELTAS,
                        eps=RADAR_CONFIRM_EPS):
-    """(delta, eps) on the recordings' valid epochs, as loso_radar_untied_levels (the definition until 2026-11-21; the
-    LOSO reference is now one margin kappa, read from category2/rules.csv as delta = eps = kappa): eps by the bout
-    count, then delta by the mean bout duration; ties: the smallest"""
+    """(delta, eps) on the recordings' valid epochs, the radar definition until 2026-11-21 (the LOSO reference is now
+    one margin kappa, read from category2/rules.csv as delta = eps = kappa): eps by the bout count, then delta by the
+    mean bout duration; ties: the smallest"""
     def mean_duration(b):
         return (b[:, 1] - b[:, 0]).mean() if len(b) else np.nan
 

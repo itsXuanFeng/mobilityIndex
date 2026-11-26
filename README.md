@@ -50,20 +50,20 @@ mobility/                  the package
     cache.py               per-recording caches of the features (features.npz, angle_features.npz), the noise floor
   groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed, posture signals; active threshold
   labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
-  bouts.py                 bout definition (hysteresis, confirmation, gap filling, minimum bout); its calibration;
-                           bout matching
+  bouts.py                 bout definition (hysteresis, confirmation by the level or a posture transition, gap
+                           filling, minimum bout); its calibration; bout matching
   posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar
                            posture model (hidden semi-Markov; the height rule as a comparison)
   transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier and hand
                            rule (comparisons); event matching
   align.py                 time offset radar <-> MoCap, radar position and orientation fits
   session.py               one recording: aligned features + MoCap + labels + evaluation masks (cached)
-  states.py                per-epoch States from the radar or from MoCap
+  states.py                per-epoch States from the radar or from MoCap; the radar level corrected for distance
   metrics/                 @metric registry; category1.py, category2.py, category3.py
   evaluation/              radar vs MoCap, everything calibrated leave-one-subject-out:
     agreement.py           per recording: metrics of both sensors, agreement, no-sensor baseline (all categories)
     category1.py           per epoch: AUC, F1, radar thresholds; per person, per activity, per distance
-    category2.py           bouts per epoch and per bout; the radar bout margin κ (one parameter)
+    category2.py           bouts per epoch and per bout, in and out of bed; radar distance slope, entry, margin κ
     category3.py           transitions per event, posture per epoch; posture model, height rule, peak quantile, comparisons
     personal.py            personal calibration on top of leave-one-subject-out
   plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, per_person.py,
@@ -83,21 +83,21 @@ CUDA_VISIBLE_DEVICES=0 python scripts/radar_pass.py --only person_1/scenario_1 p
 python scripts/calibrate_mocap_threshold.py
 # 3. Category 1 evaluation on every recording that has a cube
 python scripts/evaluate_category1.py --workers 16
-# 4. Category 2: MoCap bout definition calibrated against the labels (MoCap + labels only), then the evaluation
-#    (needs step 3; calibrates the radar exit and confirmation thresholds)
-python scripts/calibrate_bout_rule.py
-python scripts/evaluate_category2.py --workers 16
-# 5. Category 3: MoCap posture rule calibrated against the script (MoCap + labels only), then the evaluation
+# 4. Category 3: MoCap posture rule calibrated against the script (MoCap + labels only), then the evaluation
 #    (needs step 3 and the angle pass below)
 python scripts/calibrate_posture.py --workers 16
 python scripts/evaluate_category3.py --workers 16
+# 5. Category 2: MoCap bout definition calibrated against the labels (MoCap + labels and the MoCap posture rule),
+#    then the evaluation (needs steps 3 and 4: posture transitions confirm a bout; calibrates the radar definition)
+python scripts/calibrate_bout_rule.py --workers 16
+python scripts/evaluate_category2.py --workers 16
 # personal calibration (after steps 3-5)
 python scripts/evaluate_personal_calibration.py --workers 16
 # radar vs MoCap over time (after steps 3-5)
 python scripts/plot_agreement.py --only person_10/scenario_2
 python scripts/plot_bouts.py --only person_10/scenario_2
 python scripts/plot_transitions.py --only person_10/scenario_2
-# per person (after steps 3-4, and the personal calibration)
+# per person (after steps 3 and 5, and the personal calibration)
 python scripts/plot_per_person.py
 python scripts/plot_per_person_category2.py
 python scripts/plot_per_person_personal.py
@@ -179,7 +179,7 @@ def longest_bout(s):
     return float(_durations(s).max())        # helpers of the category's module
 ```
 
-It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule and the exit and confirmation thresholds from `States.extra['bout_rule']`, `['exit_threshold']` and `['confirm_threshold']` (and an optional radar `['confirm_speed']`), which `metric_table(..., bout_rules=..., bout_levels=...)` sets. Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
+It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule, the exit and confirmation thresholds and the posture transitions per epoch from `States.extra['bout_rule']`, `['exit_threshold']`, `['confirm_threshold']` and `['bout_transitions']` (and an optional radar `['confirm_speed']`), which `metric_table(..., bout_rules=..., bout_levels=...)` and `set_bout_transitions` set; the radar `States` carry the distance-corrected level (`states.distance_corrected`). Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
 
 **State a metric needs**: add a field to `States` in `mobility/states.py` and fill it in both `radar_states` and `mocap_states` (per epoch), or set it in `metric_table` (events, like `transitions`).
 
