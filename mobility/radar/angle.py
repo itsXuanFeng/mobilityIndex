@@ -169,7 +169,7 @@ def frame_features(points, floor_db, n_frames):
     bins hold breathing and small movements, so a still person is usually visible):
         h_top       height of the top of the body (m): TOP_QUANTILE of the heights of the person's points
         h_med       median height of the person's points (m): the middle of the body; separates lying in bed from
-                    lying on the floor, where the top of the body barely differs (docs/category3.md)
+                    lying on the floor, where the top of the body barely differs (docs/c3_posture.md)
         x_person, z_person   position of the person (m, MoCap frame): median of all clearly visible points
         n_person    number of the person's points;  n_slow: of them, slower than MIN_SPEED (still)
         e_body      movement energy of the person (m^2/s^2): mean squared radial speed over all their points, still
@@ -181,7 +181,7 @@ def frame_features(points, floor_db, n_frames):
         v_q900 ... v_q995    speed of the person (m/s, along the line to the radar): the power-weighted quantile
                     PEAK_QUANTILES of the |velocity| of their moving points. A high quantile, not the fastest cell:
                     a strong reflection leaks power into neighbouring Doppler bins, and the fastest cell above the
-                    floor sits on that leakage (docs/category3.md, Peak Doppler)
+                    floor sits on that leakage (docs/c3_posture.md)
     Clearly visible: STRONG_DB above the floor, inside the radar coverage and the room, between the floor and the
     radar. The person: within PERSON_RADIUS_M of the position. NaN (counts 0) where fewer than MIN_PERSON_POINTS.
     The caregiver and operator would also be seen: their periods are outside the evaluation window.

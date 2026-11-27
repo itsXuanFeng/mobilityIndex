@@ -11,7 +11,7 @@ Activity bouts from a per-epoch activity level (Category 2). The same steps are 
     3. gaps: inactive runs of at most max_gap epochs between two active runs are filled;
     4. minimum bout: active runs shorter than min_bout epochs (after 3) are dropped.
 Each step uses only past epochs; online, a bout is known once it is confirmed, and dated back to its start (a
-transition is known once the posture model has decided it, see docs/category3.md).
+transition is known once the posture model has decided it, see docs/c3_posture.md).
 Epochs outside the evaluation window (valid = False) end a bout: a bout never spans them and no gap is filled across
 them. A bout cut by the window edge counts, with the part inside the window.
 

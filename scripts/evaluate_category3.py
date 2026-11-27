@@ -28,7 +28,7 @@ version) is reported next to it.
 
 Comparisons, also leave-one-subject-out:
     height rule         see above (radar_posture_rule.csv; mobility/evaluation/personal.py builds on it)
-    classifier          burst classifier on range and Doppler only (the first version, docs/category3.md)
+    classifier          burst classifier on range and Doppler only (the first version, docs/c3_posture.md)
     classifier+angle    the same with the angle burst features (height before / after, distance from the axis)
     hand rule           thresholds on burst speed, range change, duration (finds transitions, not their kind)
 
@@ -69,8 +69,8 @@ from mobility.cli import error_summary, parallel_map, wide_tables  # noqa: E402
 from mobility.config import EPOCH_FRAMES  # noqa: E402
 from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
-from mobility.posture import (POSTURE_MODEL_FILE, POSTURES, RADAR_POSTURE_RULE_FILE, UNKNOWN, decode_postures,  # noqa: E402
-                              epoch_posture, posture_rules)
+from mobility.posture import (GRID_P_STILL, POSTURE_MODEL_FILE, POSTURES, RADAR_POSTURE_RULE_FILE, UNKNOWN,  # noqa: E402
+                              decode_postures, epoch_posture, posture_rules)
 from mobility.session import load_session  # noqa: E402
 from mobility.transitions import COUNTED  # noqa: E402
 from mobility.utils import fold_of, spread  # noqa: E402
@@ -78,6 +78,7 @@ from mobility.utils import fold_of, spread  # noqa: E402
 # filled before the worker pools fork: prepared recordings (mobility.evaluation.prepare_recording), the MoCap posture
 # rule per person ('ALL' too), and the recordings to score (--only)
 DATA, RULE_OF, SCORED = {}, {}, set()
+P_STILL_GRID = list(GRID_P_STILL)     # --p-still
 
 
 def prepare(job):
@@ -92,7 +93,7 @@ def prepare(job):
 
 def run_posture_fold(person):
     """the posture model calibrated without one person (None: on everyone), in a worker"""
-    return person, ev.calibrate_posture_model(DATA, RULE_OF, person)
+    return person, ev.calibrate_posture_model(DATA, RULE_OF, person, P_STILL_GRID)
 
 
 def run_fold(job):
@@ -119,8 +120,12 @@ if __name__ == '__main__':
     ap.add_argument('--only', nargs='+', metavar='PERSON/SCENARIO', help='recordings to score (all calibrate)')
     ap.add_argument('--workers', type=int, default=1, help='recordings prepared in parallel')
     ap.add_argument('--fold-workers', type=int, default=13, help='left-out persons trained in parallel')
+    ap.add_argument('--p-still', type=float, nargs='+', default=list(GRID_P_STILL),
+                    help='posture model: per-frame change probability while not moving; several values: calibrated on '
+                         'the grid with beta and p_move (default: the hand-set value)')
     add_run_args(ap)
     args = ap.parse_args()
+    P_STILL_GRID[:] = args.p_still
     with run('category3', args, partial=bool(args.only)) as run_dir:
         th = pd.read_csv(latest('category1', 'thresholds.csv'))   # recordings evaluated in Category 1
         rules = posture_rules()
@@ -150,7 +155,8 @@ if __name__ == '__main__':
         mr.to_csv(os.path.join(out, POSTURE_MODEL_FILE), index=False)
         held = mr[mr.person != 'ALL']
         print(f'posture model, all persons: {model_of["ALL"]}\n  leaving each person out: beta '
-              f'{held.beta.value_counts().to_dict()}, p_move {held.p_move.value_counts().to_dict()}, minimum posture '
+              f'{held.beta.value_counts().to_dict()}, p_move {held.p_move.value_counts().to_dict()}, p_still '
+              f'{held.p_still.value_counts().to_dict()}, minimum posture '
               f'{held.d_min_s.value_counts().to_dict()} s, sitting top {held.sitting_top_per_m.min():+.3f} to '
               f'{held.sitting_top_per_m.max():+.3f} m per m off-axis; training transition F1 '
               f'{held.train_transition_f1.min():.3f}-{held.train_transition_f1.max():.3f}', flush=True)

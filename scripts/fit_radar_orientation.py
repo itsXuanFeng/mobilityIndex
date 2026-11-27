@@ -12,7 +12,9 @@ RADAR_YAW_DEG, RADAR_MIRROR), for both direction estimators, then reports, with 
     python scripts/fit_radar_orientation.py --only person_1/scenario_1 person_10/scenario_2
 
 Writes <person>_<scenario>_angle.png to its run folder: x, z and height over time, radar vs MoCap, with the
-phase estimator and the orientation fitted on all the recordings given.
+phase estimator and the orientation fitted on all the recordings given; and errors.csv, per frame with the phase
+estimator: horizontal error, height error from the angle and from the range alone (m), distance of the joint from the
+radar axis (m), recording.
 """
 import argparse
 import os
@@ -107,6 +109,8 @@ if __name__ == '__main__':
         best = 'phase'                       # the default of mobility.radar.angle.localise
         out = run_dir
         e = errors(df, best, fits[best]['yaw_deg'], fits[best]['mirror'])
+        (e[['horizontal', 'height_angle', 'height_range', 'offaxis']].assign(rec=df.rec.values)
+         .to_csv(os.path.join(run_dir, 'errors.csv'), index=False))
         for rec, g in df.groupby('rec'):
             path = os.path.join(out, rec.replace('/', '_') + '_angle.png')
             angle_figure(g, e.loc[g.index], path, f'{rec}: angle check, {best}, yaw {fits[best]["yaw_deg"]} deg, '

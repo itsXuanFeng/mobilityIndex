@@ -1,0 +1,7 @@
+# Python 3.11; versions used for the results in docs/
+numpy==1.26.4
+pandas==2.3.3
+scipy==1.17.1
+scikit-learn==1.9.0
+matplotlib==3.11.1
+torch==2.6.0          # radar pass; a CUDA build speeds it up, the CPU build also works

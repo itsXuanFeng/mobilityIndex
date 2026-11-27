@@ -36,7 +36,8 @@ from .groundtruth import mocap_50hz
 from .io.mocap import MOCAP_FPS
 from .io.recordings import labels as load_labels
 from .labels import caregiver_period, script_period
-from .utils import best_threshold, read_calibration
+from .radar.features import FEATURES
+from .utils import best_threshold, log_level, read_calibration
 
 STANDING, SITTING, LYING, FLOOR = 0, 1, 2, 3
 UNKNOWN = -1
@@ -166,7 +167,7 @@ class RadarPostureRule:
         standing  h > h_stand;   sitting  h_sit < h <= h_stand;   lying  h_floor < h <= h_sit;   floor  h <= h_floor
     h is first corrected for the distance d of the person from the radar axis: h + offaxis_k * d. Off-axis the radar
     sees less of the top of the head (more of the chest, which breathes), so the measured height falls by ~0.1 m per m
-    from the axis; the directions themselves are unbiased (docs/category3.md).
+    from the axis; the directions themselves are unbiased (docs/c3_posture.md).
     Where the radar doesn't see the person, the last posture carries forward (a still, unseen person hasn't moved).
     A posture counts once it has lasted min_hold_s, as for MoCap. Thresholds: balanced accuracy per epoch against the
     MoCap posture; offaxis_k and min_hold_s: transition F1 against MoCap; all leaving the evaluated person out
@@ -247,7 +248,10 @@ OUTLIER_DENSITY = 0.02    # 1/m^2: uniform outlier component of the emission, so
 P_STILL = 1e-6            # per frame: chance of a posture change while the radar sees no movement
 MOVING_WIDEN_S = 1.0      # the movement gate is widened by this on both sides (the heights are smoothed over 1 s)
 GRID_BETA = (0.05, 0.1, 0.2)          # weight of one frame's evidence (frames 50 ms apart aren't independent)
-GRID_P_MOVE = (1e-3, 3e-3, 1e-2)      # per frame: chance of a posture change while the person moves
+GRID_P_MOVE = (1e-4, 3e-4, 1e-3, 3e-3, 1e-2)   # per frame: chance of a posture change while the person moves
+#                                       (extended below 1e-3 on 2026-11-26: with the movement mask fixed, most folds
+#                                       chose the smallest value of the old grid)
+GRID_P_STILL = (P_STILL,)             # set by hand; scripts/evaluate_category3.py --p-still calibrates it on a grid
 ALLOWED = ~np.eye(len(POSTURES), dtype=bool)   # every posture change is allowed (falls from a chair or bed too)
 EMISSION_STEP = 5         # fit the emission on every 5th frame (neighbouring frames are nearly identical)
 
@@ -267,7 +271,7 @@ class RadarPostureModel:
                 p_move while the person moves (Category 1 active, widened by MOVING_WIDEN_S), P_STILL otherwise.
                 d_min_s is the MoCap posture rule's min_hold_s, so both sensors define a posture the same way; on
                 the scripted campaign a longer one would always score better, because its short postures are passing
-                phases (kneeling while getting up, bending), so it is not calibrated on the radar (docs/category3.md).
+                phases (kneeling while getting up, bending), so it is not calibrated on the radar (docs/c3_posture.md).
     changes     every posture change allowed (ALLOWED), all equally likely: nothing about the script is learned.
     decoding    Viterbi (decode_postures); the transitions are the changes of the decoded posture, with no further
                 hold (mobility.transitions.posture_transitions with one frame).
@@ -282,8 +286,9 @@ class RadarPostureModel:
     d_min_s: float = 3.0
     p_still: float = P_STILL
 
-    def with_settings(self, beta, p_move):
-        return RadarPostureModel(self.coef, self.cov, beta, p_move, self.d_min_s, self.p_still)
+    def with_settings(self, beta, p_move, p_still=None):
+        return RadarPostureModel(self.coef, self.cov, beta, p_move, self.d_min_s,
+                                 self.p_still if p_still is None else p_still)
 
     def log_emission(self, top, med, offaxis):
         """(T, 4) weighted log-likelihood of each posture per frame, relative to the most likely one; 0 where the
@@ -334,8 +339,13 @@ def radar_median_height(session):
 
 def radar_moving(session, threshold, feature='n_cells'):
     """(T,) bool: the person moves, per frame: the Category 1 activity feature above its threshold (calibrated
-    against MoCap without this person), widened by MOVING_WIDEN_S on both sides"""
-    a = np.nan_to_num(np.asarray(session.radar[feature], float)) > threshold
+    against MoCap without this person), widened by MOVING_WIDEN_S on both sides. The feature is compared on the scale
+    the threshold was calibrated on: its per-frame log level for log features (mobility.states.feature_level averages
+    the same per-frame values over an epoch). Until 2026-11-26 the raw count was compared with the log-level threshold,
+    so nearly every frame with 2 or more cells counted as moving (~91% of the frames after widening)."""
+    x = np.asarray(session.radar[feature], float)
+    level = log_level(x) if FEATURES[feature].log else x
+    a = np.nan_to_num(level, nan=-np.inf) > threshold
     w = int(round(MOVING_WIDEN_S * FPS))
     return pd.Series(a.astype(float)).rolling(2 * w + 1, center=True, min_periods=1).max().values > 0
 

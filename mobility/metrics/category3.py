@@ -1,5 +1,5 @@
 """
-Category 3: postural transitions, and the time in each posture. See docs/category3.md.
+Category 3: postural transitions, and the time in each posture. See docs/c3_posture.md.
 
 Posture times read the posture per epoch in States.posture (MoCap: the calibrated MoCap rule; radar: the posture model,
 mobility.posture.RadarPostureModel), over the valid epochs where the posture is known.

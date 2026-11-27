@@ -15,6 +15,8 @@ All thresholds are calibrated leave-one-subject-out. Writes to its run folder, o
     per_person.csv     per person: AUC, F1 active, F1 inactive, energy error
     per_label.csv      per scripted activity: MoCap vs radar active share
     distance.csv       distance dependence of each feature
+    epochs.csv.gz      per epoch in the evaluation window: MoCap speed and active, the level of each radar feature, the
+                       radar threshold of its recording (for ROC curves and timelines)
 """
 import argparse
 import os
@@ -107,6 +109,9 @@ if __name__ == '__main__':
         worst = scores[scores.feature == ACTIVE_FEATURE].nsmallest(8, 'f1')
         print(f'lowest F1 ({ACTIVE_FEATURE}):\n{worst.round(3).to_string(index=False)}')
 
+        (table[table.window][['rec', 'person', 't', 'label', 'dist', 'speed', 'active'] + FEATURES]
+         .assign(radar_threshold=lambda d: d.rec.map(thresholds[ACTIVE_FEATURE]))
+         .to_csv(f'{out}/epochs.csv.gz', index=False))
         pd.DataFrame([dict(rec=s.name, person=s.person, active_feature=ACTIVE_FEATURE, energy_feature=ENERGY_FEATURE,
                            radar_threshold=thresholds[ACTIVE_FEATURE][s.name], mocap_threshold=gt_thr[s.person])
                       for s in sessions]).to_csv(f'{out}/thresholds.csv', index=False)

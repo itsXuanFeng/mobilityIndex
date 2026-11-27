@@ -1,188 +1,130 @@
-# Mobility index from a ceiling radar
+# Mobility index from a ceiling-mounted FMCW radar
 
-How well does a person move about at home? This project computes **mobility metrics** from a small FMCW radar on the ceiling: no camera, nothing to wear. Every metric is validated against full-body motion capture (MoCap), recorded at the same time in a lab apartment where participants followed a script of everyday activities (January 2026 campaign).
+This project computes **mobility metrics** of a person at home from a single ceiling-mounted FMCW radar, without a camera or a wearable device. It targets the monitoring of older adults. Every metric is validated against full-body motion capture (MoCap), recorded simultaneously in a lab apartment while participants followed a script of everyday activities.
 
-The metrics fall into three categories:
+## Metrics
 
-| Category | Metrics | Status |
+| Category | Metrics | Method and results |
 |---|---|---|
-| [1. Total movement volume](docs/category1.md) | total activity energy, active time, inactive time | active / inactive time validated against MoCap; energy ranks recordings like MoCap |
-| [2. Activity bout structure](docs/category2.md) | number of bouts, bout duration (mean, variance), fragmentation | validated against MoCap; needs free-living data to show differences between people |
-| [3. Postural transitions](docs/category3.md) | sit-to-stand, stand-to-sit, lie-to-sit counts, peak transition speed; time standing, sitting, lying, on the floor | posture and posture times validated against MoCap; transition counts fixed by the script |
+| 1. Total movement volume | active time, inactive time, total activity energy | [docs/c1_movement.md](docs/c1_movement.md) |
+| 2. Activity bout structure | number of bouts, mean and variance of bout duration, fragmentation index | [docs/c2_bout.md](docs/c2_bout.md) |
+| 3. Postural transitions and posture | sit-to-stand, stand-to-sit and lie-to-sit counts, peak transition speed; time standing, sitting, lying and on the floor | [docs/c3_posture.md](docs/c3_posture.md) |
 
-Also: [locating the person with the angle of arrival](docs/angle.md), and [how parameters are calibrated](docs/calibration.md), for the population and per person. All radar parameters are calibrated leaving the evaluated person out, so the results show how the radar works for someone it has never seen.
+All radar parameters are calibrated with leave-one-subject-out cross-validation, so the results estimate the performance for an unseen person. [docs/calibration.md](docs/calibration.md) describes the calibration for the population, per person, and without labels.
+
+## Hardware and data
+
+**Radar.**
+
+| | |
+|---|---|
+| Sensor | Texas Instruments IWR6843AOP, 60 GHz FMCW, antenna-on-package |
+| Capture | raw ADC data with a TI DCA1000EVM; configured in mmWave Studio |
+| Mounting | on the ceiling, facing down |
+| Antennas | 3 TX (time-division multiplexed) × 4 RX = 12 virtual channels in a 2-D array |
+| Chirp | starts at 60 GHz, slope 80 MHz/µs; 256 complex samples at 6 Msps (3.4 GHz sampled bandwidth); 150 µs per chirp |
+| Frame | 100 chirps per transmitter, every 50 ms (20 frames/s) |
+| Range | 4.4 cm per bin; 0.3–5.6 m used |
+| Radial velocity | 4.3 cm/s per bin; ±2.78 m/s |
+
+**Reference.** Markerless full-body motion capture (Captury) at 50 Hz, and the start and end times of each scripted activity.
+
+**Campaign.** January 2026: 156 recordings in one lab apartment with six furniture layouts. 148 recordings of 27 participants have radar, MoCap and labels and are evaluated.
 
 ## Pipeline
 
 ```mermaid
 flowchart LR
-    RAW[("raw radar<br/>~13 GB / recording")] -->|"radar pass<br/>(once, network-bound)"| CUBE["range-Doppler cube<br/>12 channels, T x 128 x 128"]
-    CUBE --> FEAT["per-frame radar features<br/>(@feature registry)"]
-    MOCAP[("MoCap shots")] --> GT["per-frame MoCap signals"]
-    LOG[("capture log, labels")] --> SES
-    FEAT --> SES["Session<br/>aligned in time, evaluation window"]
+    RAW[("raw radar data")] -->|"radar pass"| CUBE["range-Doppler map<br/>per frame"]
+    RAW -->|"angle pass"| PTS["3-D points<br/>(angle of arrival)"]
+    CUBE --> FEAT["radar features<br/>per frame"]
+    PTS --> PERS["the person per frame:<br/>position, heights, speeds"]
+    MOCAP[("MoCap and labels")] --> GT["MoCap signals<br/>per frame"]
+    FEAT --> SES["recording: aligned in time,<br/>evaluation window"]
+    PERS --> SES
     GT --> SES
-    SES --> RS["radar States<br/>per epoch"]
-    SES --> MS["MoCap States<br/>per epoch"]
-    RS --> MET["metrics<br/>(@metric registry,<br/>same rule for both)"]
-    MS --> MET
-    MET --> EVAL["evaluation<br/>per epoch, per recording"]
+    SES --> ST["radar and MoCap states<br/>per epoch (1 s)"]
+    ST --> MET["metrics:<br/>the same rule for both"]
+    MET --> EVAL["evaluation and figures"]
 ```
 
-Each metric is a single rule applied to *states*: per-epoch energy, activity level, active/inactive, and the postural transitions. The radar and MoCap states have the same form, so a metric gets the same definition on both sides, and the two are compared per epoch and per recording.
+The raw data are read twice: once for the channel-averaged range–Doppler map, and once to keep the per-channel values that carry the direction. Each metric is one rule applied to per-epoch *states* (activity level, energy, posture, transitions), which have the same form for the radar and for MoCap.
 
-## Layout
+## Repository layout
 
 ```
-mobility/                  the package
-  config.py                paths (data, outputs), radar constants, radar position, thresholds, epochs
-  experiment.py            experiment runs: a timestamped folder per run, its log and record; reading other runs
-  utils.py                 small helpers: NaN-aware signals, runs of a mask, thresholds, calibration tables
-  io/                      reading the data: raw .bin frames (also in background batches), capture logs and labels,
-                           MoCap shots and tracks
-  radar/
-    dsp.py                 range-Doppler spectrum and power of all 12 virtual channels (GPU or CPU)
-    cube.py                one pass over a raw recording -> cube (channel-averaged power)
-    points.py              the angle pass: second read -> per-channel complex values of the cells that hold something
-    angle.py               points -> direction cosines -> 3-D positions (virtual array, phase corrections, orientation);
-                           per-frame features of the person
-    features.py            per-frame features of the cube, @feature registry
-    cache.py               per-recording caches of the features (features.npz, angle_features.npz), the noise floor
-  groundtruth.py           MoCap: joint speeds, kinetic-energy proxy, radial speed, posture signals; active threshold
-  labels.py                activity labels -> active / inactive classes, scripted and caregiver periods
-  bouts.py                 bout definition (hysteresis, confirmation by the level or a posture transition, gap
-                           filling, minimum bout); its calibration; bout matching
-  posture.py               standing / sitting / lying / floor: from the script, the MoCap posture rule, the radar
-                           posture model (hidden semi-Markov; the height rule as a comparison)
-  transitions.py           postural transitions from a posture sequence (MoCap and radar); burst classifier and hand
-                           rule (comparisons); event matching
-  align.py                 time offset radar <-> MoCap, radar position and orientation fits
-  session.py               one recording: aligned features + MoCap + labels + evaluation masks (cached)
-  states.py                per-epoch States from the radar or from MoCap; the radar level corrected for distance
-  metrics/                 @metric registry; category1.py, category2.py, category3.py
-  evaluation/              radar vs MoCap, everything calibrated leave-one-subject-out:
-    agreement.py           per recording: metrics of both sensors, agreement, no-sensor baseline (all categories)
-    category1.py           per epoch: AUC, F1, radar thresholds; per person, per activity, per distance
-    category2.py           bouts per epoch and per bout, in and out of bed; radar distance slope, entry, margin κ
-    category3.py           transitions per event, posture per epoch; posture model, height rule, peak quantile, comparisons
-    personal.py            personal calibration on top of leave-one-subject-out
-  plots/                   figures: agreement.py (radar vs MoCap over time), bouts.py, transitions.py, per_person.py,
-                           sensitivity.py, angle.py, diagnostic.py; common.py and style.py shared
-  cli.py                   helpers of the scripts: recordings to run, parallel map, printing
-scripts/                   command-line entry points (below): they read and write the tables; the logic is in mobility/
-docs/                      short overview per category
-output/                    everything generated (git-ignored; MOBILITY_OUTPUT overrides the location), below
+mobility/            the package
+  config.py          data paths, radar constants, radar position, epoch length
+  experiment.py      one output folder per run of a script
+  io/                reading raw radar data, MoCap and labels
+  radar/             radar processing: range-Doppler map, angle of arrival, features
+  groundtruth.py     MoCap signals and the MoCap active threshold
+  session.py         one recording: radar, MoCap and labels aligned in time
+  states.py          per-epoch states of the radar and of MoCap
+  bouts.py           bout detection (Category 2)
+  posture.py         posture: MoCap rule and radar posture model (Category 3)
+  transitions.py     postural transitions and their matching (Category 3)
+  moments.py         walking moments, without labels (calibration)
+  metrics/           the metrics of each category
+  evaluation/        radar against MoCap, per category
+  plots/             figures
+scripts/             command-line entry points, one per step
+docs/                methods and results per category; figures/
+output/              everything generated (not in git)
 ```
 
-## Running
+## Reproducing the results
+
+**Requirements.** Python 3.11 and the packages in [requirements.txt](requirements.txt) (`pip install -r requirements.txt`); a GPU speeds up the radar pass but is optional. Set the paths of the campaign data at the top of `mobility/config.py`. Outputs go to `output/`, or to the folder in the environment variable `MOBILITY_OUTPUT`.
+
+**Steps.** Run the scripts in this order. Each step reads the results of the previous ones.
 
 ```bash
-# 1. cubes: reads raw data, ~3 min per recording, network-bound; pick a free GPU
-CUDA_VISIBLE_DEVICES=0 python scripts/radar_pass.py --only person_1/scenario_1 person_5/scenario_3
-# 2. MoCap active threshold, calibrated against the activity labels (MoCap + labels only, all recordings)
-python scripts/calibrate_mocap_threshold.py
-# 3. Category 1 evaluation on every recording that has a cube
+# 1. Radar processing (once; reads the raw data, network-bound)
+python scripts/radar_pass.py                                   # range-Doppler maps, ~3 min per recording
+python scripts/angle_pass.py --device cpu --threads 8          # per-channel values for the angle, ~7 h in total
+
+# 2. MoCap reference, calibrated against the script labels (MoCap and labels only)
+python scripts/calibrate_mocap_threshold.py                    # active threshold
+python scripts/calibrate_posture.py --workers 16               # posture rule
+
+# 3. Evaluation, radar against MoCap
 python scripts/evaluate_category1.py --workers 16
-# 4. Category 3: MoCap posture rule calibrated against the script (MoCap + labels only), then the evaluation
-#    (needs step 3 and the angle pass below)
-python scripts/calibrate_posture.py --workers 16
-python scripts/evaluate_category3.py --workers 16
-# 5. Category 2: MoCap bout definition calibrated against the labels (MoCap + labels and the MoCap posture rule),
-#    then the evaluation (needs steps 3 and 4: posture transitions confirm a bout; calibrates the radar definition)
-python scripts/calibrate_bout_rule.py --workers 16
-python scripts/evaluate_category2.py --workers 16
-# personal calibration (after steps 3-5)
-python scripts/evaluate_personal_calibration.py --workers 16
-# radar vs MoCap over time (after steps 3-5)
-python scripts/plot_agreement.py --only person_10/scenario_2
-python scripts/plot_bouts.py --only person_10/scenario_2
-python scripts/plot_transitions.py --only person_10/scenario_2
-# per person (after steps 3 and 5, and the personal calibration)
-python scripts/plot_per_person.py
-python scripts/plot_per_person_category2.py
-python scripts/plot_per_person_personal.py
-# diagnostics
-python scripts/plot_timeline.py person_1/scenario_1
-# angle pass: second read of the raw data, ~6.5 h for the campaign, after step 1
-python scripts/angle_pass.py --only person_1/scenario_1 --device cpu --threads 8
-python scripts/fit_radar_orientation.py --only person_1/scenario_1 person_5/scenario_3 person_10/scenario_2
-python scripts/fit_radar_position.py --only person_1/scenario_1 person_5/scenario_3 person_10/scenario_2
-# every run so far: status, git commit, inputs
-python scripts/list_experiments.py
+python scripts/evaluate_category3.py --workers 16              # needs Category 1 (movement detection)
+python scripts/calibrate_bout_rule.py --workers 16             # MoCap bout definition
+python scripts/evaluate_category2.py --workers 16              # needs Categories 1 and 3
+
+# 4. Localisation check: one recording per furniture layout
+python scripts/fit_radar_orientation.py --only person_1/scenario_1 person_10/scenario_2 person_5/scenario_3 \
+    person_12/scenario_5 person_15/scenario_4 person_22/scenario_6
+
+# 5. Figures of the docs (--docs copies them to docs/figures/)
+python scripts/plot_category1.py --docs
+python scripts/plot_category2.py --docs
+python scripts/plot_category3.py --docs
 ```
 
-### Experiment runs
+Optional analyses:
 
-Every script is an experiment: each run writes into its own folder, named after the experiment and the time it started, and never overwrites an earlier run.
+| Script | Content |
+|---|---|
+| `evaluate_personal_calibration.py` | personal calibration on top of the population calibration |
+| `check_mounting_height.py` | walking moments and the check of the radar's mounting height |
+| `fit_radar_position.py` | radar position against MoCap |
+| `plot_agreement.py`, `plot_bouts.py`, `plot_transitions.py` | radar and MoCap over time, per recording (`--only person_x/scenario_y`) |
+| `plot_per_person*.py` | signed error per participant |
+| `list_experiments.py` | every run so far: status, commit, inputs |
 
-```
-output/
-  cache/<person>/<scenario>/                 per-recording products, shared by all runs (radar cube, angle-pass points,
-                                             features, MoCap signals, alignment)
-  experiments/<name>_<YYYY-MM-DD_HHMMSS>/    one run: its tables and figures, plus
-      log.txt                                everything it printed
-      run.json                               command, arguments, start / end, status, git commit, the runs it read
-      diff.patch                             uncommitted changes (and new untracked code) at the time of the run
-  latest/<name> -> ../experiments/...        the last finished, complete run of each experiment
-```
-
-A run reads the results of other experiments through `output/latest/` (for example `evaluate_category2.py` reads `latest/category1/thresholds.csv`) and records which run it read in `run.json`. Every script also takes:
+**Output.** Every run writes a new folder `output/experiments/<name>_<date>_<time>/` with its tables, figures, `log.txt` and `run.json` (command, arguments, git commit, the runs it read). `output/latest/<name>` points to the last complete run of each step, which later steps read. Common options of every script:
 
 | Option | Effect |
 |---|---|
-| `--tag NAME` | a variant: the folder becomes `<name>-NAME_<time>`, and the run does not become `latest` |
-| `--use NAME=RUN` | read run `RUN` of experiment `NAME` (a folder name in `output/experiments/`) instead of its latest |
-| `--promote` | make the run `latest` even if it is tagged or partial |
-
-A run on part of the data (`--only`, `--persons`) or a run that fails doesn't become `latest` either, so downstream steps never pick up an exploration or a quick check by accident.
-
-| Experiment (`output/experiments/<name>_*`) | Script | Content |
-|---|---|---|
-| `radar_pass`, `angle_pass` | `radar_pass.py`, `angle_pass.py` | log; the cubes and points go to `output/cache/` |
-| `mocap_threshold` | `calibrate_mocap_threshold.py` | MoCap active threshold per left-out person (and `ALL`); MoCap epochs |
-| `bout_rule` | `calibrate_bout_rule.py` | MoCap exit and confirmation factors and bout rule per left-out person (and `ALL`) |
-| `posture_rule` | `calibrate_posture.py` | MoCap posture rule per left-out person (and `ALL`) |
-| `category1`, `category2`, `category3` | `evaluate_category<k>.py` | evaluation tables (each script's docstring lists them) |
-| `personal` | `evaluate_personal_calibration.py` | personal calibration: parameters, metrics, scores per setup |
-| `floor_sensitivity`, `so_cfar` | `sensitivity_floor.py`, `prototype_so_cfar.py` | Category 1 explorations: noise floor, online detector |
-| `radar_orientation`, `radar_position` | `fit_radar_orientation.py`, `fit_radar_position.py` | radar geometry fits; angle-check figures |
-| `plot_agreement`, `plot_bouts`, `plot_transitions`, `plot_per_person*`, `plot_timeline` | `plot_*.py` | figures |
-
-Per recording, in `output/cache/<person>/<scenario>/`:
-
-| File | Content |
-|---|---|
-| `rd12_db.npy` | cube, float16 dB, (T, 128 range, 128 Doppler), ~360 MB; NaN rows for frames missing, all-zero or damaged by lost packets |
-| `pass_info.json` | radar pass: missing, all-zero and damaged frames, lost packets from the capture log, timing |
-| `points.npz`, `points_info.json` | angle pass: per-channel complex values of the cells > 6 dB above their floor, ~170 MB |
-| `features.npz`, `angle_features.npz`, `subject.json`, `mocap_50hz.npz`, `alignment.json` | session cache |
+| `--tag NAME` | a variant run, which does not become `latest` |
+| `--use NAME=RUN` | read a given run of another step instead of its latest |
+| `--promote` | make a tagged or partial run `latest` |
 
 ## Extending
 
-**A radar feature.** Add a function to `mobility/radar/features.py`:
-
-```python
-@feature('my_feature', log=True)          # log=True: compared on a log scale (power, counts)
-def my_feature(c):                        # c: Chunk with db, floor_db, p, excess (floor removed), on
-    return (c.excess * WEIGHTS).sum((1, 2))   # one value per frame
-```
-
-The next `load_session` computes it for every recording and adds it to the cache.
-
-**A MoCap signal**: add it to the dict returned by `mocap_signals` in `mobility/groundtruth.py` and its name to `SIGNALS` (cached files without it are recomputed). `to_frames` carries it to radar frames.
-
-**A metric.** Add a function of `States` to the category's module:
-
-```python
-@metric('longest_bout', category=2, unit='s')
-def longest_bout(s):
-    return float(_durations(s).max())        # helpers of the category's module
-```
-
-It is computed for both radar and MoCap by `compute_metrics` and `evaluation.metric_table`. Category 2 metrics read the bout rule, the exit and confirmation thresholds and the posture transitions per epoch from `States.extra['bout_rule']`, `['exit_threshold']`, `['confirm_threshold']` and `['bout_transitions']` (and an optional radar `['confirm_speed']`), which `metric_table(..., bout_rules=..., bout_levels=...)` and `set_bout_transitions` set; the radar `States` carry the distance-corrected level (`states.distance_corrected`). Category 3 metrics read the transition events from `States.transitions` and the posture per epoch from `States.posture`, which `metric_table(..., transitions=..., postures=...)` sets.
-
-**State a metric needs**: add a field to `States` in `mobility/states.py` and fill it in both `radar_states` and `mocap_states` (per epoch), or set it in `metric_table` (events, like `transitions`).
-
-**A category's evaluation.** Copy `scripts/evaluate_category1.py` (or `evaluate_category2.py` / `evaluate_category3.py`, which reuse the Category 1 recordings and thresholds). The building blocks are in `mobility/evaluation/`, one module per category plus `agreement.py` for the per-recording metrics; all are importable from `mobility.evaluation`.
-
-**A new experiment script.** Add its name and script to `SCRIPTS` in `mobility/experiment.py`, call `add_run_args(ap)` before parsing the arguments, and do the work inside `with run('<name>', args) as run_dir:`, writing into `run_dir`. Read other experiments' results with `latest('<name>', '<file>')`.
+- **A radar feature:** a function decorated with `@feature` in `mobility/radar/features.py`; it is computed for every recording at the next load.
+- **A metric:** a function of `States` decorated with `@metric` in `mobility/metrics/`; it is computed for the radar and for MoCap alike.
+- **A script:** register it in `SCRIPTS` in `mobility/experiment.py`, and write into the folder given by `with run('<name>', args) as run_dir:`.

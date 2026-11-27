@@ -1,5 +1,5 @@
 """
-Category 2: activity bout structure. See docs/category2.md.
+Category 2: activity bout structure. See docs/c2_bout.md.
 
 All four metrics come from the activity level of mobility.states.States, so radar and MoCap get the same steps
 (mobility.bouts): hysteresis on the level, from the entry threshold (States.active; for the radar on the

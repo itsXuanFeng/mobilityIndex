@@ -1,6 +1,6 @@
 """
 Category 3: postural transitions per event and posture per epoch, MoCap as the reference, and everything the radar
-calibrates for them leaving the evaluated person out (docs/category3.md):
+calibrates for them leaving the evaluated person out (docs/c3_posture.md):
     posture model      emission, evidence weight and change probability of mobility.posture.RadarPostureModel, the
                        main method (calibrate_posture_model)
     height rule        thresholds, off-axis correction and hold of mobility.posture.RadarPostureRule, a comparison
@@ -18,10 +18,10 @@ from sklearn.metrics import f1_score, roc_auc_score
 
 from ..config import EPOCH_FRAMES, FPS
 from ..io.recordings import parse_recording
-from ..posture import (EMISSION_STEP, FLOOR, GRID_BETA, GRID_MIN_HOLD_S, GRID_OFFAXIS_K, GRID_P_MOVE, LYING, POSTURES,
-                       SITTING, STANDING, UNKNOWN, RadarPostureModel, RadarPostureRule, calibrate_radar_thresholds,
-                       decode_postures, epoch_posture, fit_posture_emission, radar_height, radar_median_height,
-                       radar_moving, radar_offaxis)
+from ..posture import (EMISSION_STEP, FLOOR, GRID_BETA, GRID_MIN_HOLD_S, GRID_OFFAXIS_K, GRID_P_MOVE, GRID_P_STILL,
+                       LYING, POSTURES, SITTING, STANDING, UNKNOWN, RadarPostureModel, RadarPostureRule,
+                       calibrate_radar_thresholds, decode_postures, epoch_posture, fit_posture_emission, radar_height,
+                       radar_median_height, radar_moving, radar_offaxis)
 from ..radar.angle import PEAK_FEATURES
 from ..session import load_session
 from ..transitions import (ANGLE_BURST_FEATURES, BURST_FEATURES, COUNTED, MATCH_TOL_S, NONE, BurstModel, add_peak,
@@ -181,18 +181,18 @@ def fit_model_emission(recordings, mrule, step=EMISSION_STEP):
     return fit_posture_emission(*(np.concatenate(c) for c in cols))
 
 
-def calibrate_posture_model(data, rule_of, person):
+def calibrate_posture_model(data, rule_of, person, p_still_grid=GRID_P_STILL):
     """(RadarPostureModel, training transition F1) calibrated on every person but `person` ('ALL' when None), with
     MoCap under that person's MoCap posture rule: the emission fitted on their frames, the minimum posture duration
-    = that rule's min_hold_s, then beta and p_move with the best pooled transition F1 against MoCap. Ties: the first
-    in the grid."""
+    = that rule's min_hold_s, then beta and p_move (and p_still, when p_still_grid has more than one value) with the
+    best pooled transition F1 against MoCap. Ties: the first in the grid."""
     mrule = fold_of(rule_of, person)
     train = others(data, person)
     coef, cov = fit_model_emission(train, mrule)
     base = RadarPostureModel(coef, cov, d_min_s=mrule.min_hold_s)
     best = None
-    for beta, p_move in itertools.product(GRID_BETA, GRID_P_MOVE):
-        model = base.with_settings(beta, p_move)
+    for beta, p_move, p_still in itertools.product(GRID_BETA, GRID_P_MOVE, p_still_grid):
+        model = base.with_settings(beta, p_move, p_still)
         hit = n = 0
         for d, post in zip(train, decode_postures(model, [model_inputs(d) for d in train])):
             radar, mocap = model_events(d, post), d['mocap'][mrule]

@@ -18,7 +18,7 @@ Radar, comparison (range and Doppler only, the first version; with or without th
     3. kind        a classifier on these features (BurstModel), trained against the MoCap transitions of the *other*
                    persons. Without the angle, the slant range mixes height with the horizontal distance: a person
                    standing 2 m off-axis is as far from the radar as one lying below it. No hand rule on range and
-                   Doppler separated transitions from walking, bending and moving in bed (docs/category3.md), so the
+                   Doppler separated transitions from walking, bending and moving in bed (docs/c3_posture.md), so the
                    rule is learned, leaving the person out.
     4. events      bursts that are a transition with probability >= min_prob, one per direction within NMS_S (the
                    most probable). min_prob is calibrated like a threshold: on out-of-fold classifications of the

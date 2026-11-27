@@ -1,4 +1,4 @@
-"""Category 1: total movement volume. See docs/category1.md."""
+"""Category 1: total movement volume. See docs/c1_movement.md."""
 import numpy as np
 
 from . import metric

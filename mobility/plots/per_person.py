@@ -2,6 +2,7 @@
 Per-person figures from the evaluation tables:
     scores_figure, energy_error_figure, energy_bias_figure   Category 1 (scripts/plot_per_person.py)
     bouts_bias_figure                                         Category 2 (scripts/plot_per_person_category2.py)
+    signed_error_figure with CATEGORY3_PANELS                 Category 3 (scripts/plot_per_person_category3.py)
     setups_bias_figure                                        personal calibration, setups A-C
                                                               (scripts/plot_per_person_personal.py)
 Signed errors: bars are the person's mean (red: radar too high, blue: too low), dots one recording each. All on one
@@ -12,10 +13,10 @@ import numpy as np
 
 from . import style
 
-BOUT_PANELS = [  # metric, title
+BOUT_PANELS = [  # metric, title: the four Category 2 metrics
     ('n_bouts', 'Number of bouts'),
     ('bout_duration_mean', 'Mean bout duration'),
-    ('bout_duration_sd', 'SD of bout duration'),
+    ('bout_duration_var', 'Variance of bout duration'),
     ('fragmentation_index', 'Fragmentation index'),
 ]
 
@@ -93,34 +94,76 @@ def energy_bias_figure(pp, conversion, path):
     fig.savefig(path, dpi=160)
 
 
-def bouts_bias_figure(errors, persons, path, panels=BOUT_PANELS):
-    """Category 2: one panel per metric, signed error per person in % of MoCap. errors: per recording and metric,
-    person and err = 100 x (radar - MoCap) / MoCap; persons in plotting order. One y-scale for all panels, so the
-    metrics can be compared."""
-    e = errors
+CATEGORY3_PANELS = [  # metric, title, unit (Category 3: signed error in the metric's own units)
+    ('sit_to_stand_count', 'Sit-to-stand transitions', 'transitions'),
+    ('stand_to_sit_count', 'Stand-to-sit transitions', 'transitions'),
+    ('lie_to_sit_count', 'Lie-to-sit transitions', 'transitions'),
+    ('peak_transition_doppler', 'Peak transition speed', 'm/s'),
+    ('standing_time', 'Time standing', 'min'),
+    ('sitting_time', 'Time sitting', 'min'),
+    ('lying_time', 'Time lying', 'min'),
+    ('floor_time', 'Time on the floor', 'min'),
+]
+
+
+def _fmt(v, unit):
+    return f'{v:+.1f}%' if unit == '%' else f'{v:+.2f} {unit}'
+
+
+def signed_error_figure(errors, persons, panels, path, title, unit=None):
+    """one panel per metric: signed error radar - MoCap per person (bars: the person's mean; dots: their recordings),
+    and an 'all' column on the right: the mean over all recordings, with a whisker from their 10th to 90th
+    percentile. errors: per recording and metric, rec, person, err and (for the titles) mocap; persons in plotting
+    order; panels: [(metric, title)] with a common `unit` ('%' = in % of MoCap) or [(metric, title, unit)]. Each
+    panel has its own y-range, fitted to its recordings (zero included). Recordings with err NaN (in % of MoCap: MoCap
+    is 0) are left out, and the panel title says how many."""
+    panels = [p if len(p) == 3 else (*p, unit) for p in panels]
+    e = errors[errors.metric.isin([k for k, _, _ in panels])]
     pos = {p: i for i, p in enumerate(persons)}
     x = np.arange(len(persons))
+    x_all = len(persons) + 0.6
     style.apply()
-    lim = np.ceil(1.05 * e[e.metric.isin([k for k, _ in panels])].err.abs().max() / 10) * 10   # headroom for the dots
-    fig, axes = plt.subplots(len(panels), 1, figsize=(14, 11), sharex=True, constrained_layout=True)
-    for ax, (k, title) in zip(axes, panels):
+    fig, axes = plt.subplots(len(panels), 1, figsize=(14, 2.55 * len(panels) + 0.8), sharex=True,
+                             constrained_layout=True, squeeze=False)
+    axes = axes[:, 0]
+    for ax, (k, name, u) in zip(axes, panels):
         g = e[e.metric == k]
+        n_out = int(g.err.isna().sum())          # no error defined (in % of MoCap: MoCap is 0)
+        g = g.dropna(subset=['err'])
         _signed_bars(ax, x, g.groupby('person').err.mean().reindex(persons).values, g, pos, 'err')
-        ax.set_ylim(-lim, lim)
-        ax.yaxis.set_major_formatter(lambda v, _: f'{v:+.0f}%' if v else '0%')
-        ax.set_ylabel('radar − MoCap\n(% of MoCap)')
+        m, (lo, hi) = g.err.mean(), np.percentile(g.err, [10, 90])
+        ax.bar([x_all], [m], 0.6, color=style.OVER if m >= 0 else style.UNDER, edgecolor=style.INK, linewidth=1)
+        ax.vlines(x_all, lo, hi, color=style.INK, lw=1.2)                  # the mean may lie outside it (counts)
+        ax.hlines([lo, hi], x_all - 0.12, x_all + 0.12, color=style.INK, lw=1.2)
+        ax.axvline(len(persons) - 0.1, color=style.MUTED, lw=0.6, ls=':')
+        ymin, ymax = min(0, g.err.min()), max(0, g.err.max())     # fitted to this panel's recordings, zero included
+        pad = 0.08 * (ymax - ymin) if ymax > ymin else 1
+        ax.set_ylim(ymin - pad, ymax + pad)
+        ax.yaxis.set_major_formatter((lambda v, _: f'{v:+.0f}%' if v else '0%') if u == '%' else
+                                     (lambda v, _: f'{v:+g}' if v else '0'))
+        ax.set_ylabel('radar − MoCap\n' + ('(% of MoCap)' if u == '%' else f'({u})'))
         ax.grid(axis='x', visible=False)
-        ax.set_title(f'{title}: mean signed error {g.err.mean():+.1f}%, mean absolute error {g.err.abs().mean():.1f}% '
-                     f'(per recording)', loc='left')
-    axes[-1].set_xticks(x, _short(persons))
-    axes[-1].set_xlim(-0.7, len(persons) - 0.3)
-    axes[0].plot([], [], 'o', ms=4, mfc=style.SURFACE, mec=style.INK, mew=1, label='one recording')
-    axes[0].bar([np.nan], [np.nan], color=style.OVER, label='person mean: radar too high')
-    axes[0].bar([np.nan], [np.nan], color=style.UNDER, label='person mean: radar too low')
-    axes[0].legend(ncol=3, loc='lower right', bbox_to_anchor=(1, 1.0), borderaxespad=0.2)
-    fig.suptitle('Category 2: signed error per person (148 recordings, 27 people)', x=0.01, ha='left',
-                 fontsize=12, fontweight='bold')
+        scale = '' if u == '%' else f'; MoCap median {g.mocap.median():.2f} {u}'
+        if n_out:
+            scale += f'; {n_out} recording{"s" if n_out > 1 else ""} with MoCap 0 left out'
+        ax.set_title(f'{name}: mean signed error {_fmt(m, u)}, mean absolute error {_fmt(g.err.abs().mean(), u)[1:]} '
+                     f'(per recording{scale})', loc='left')
+    axes[-1].set_xticks(list(x) + [x_all], _short(persons) + ['all'])
+    axes[-1].set_xlim(-0.7, x_all + 0.7)
+    h = [plt.Line2D([], [], ls='none', marker='o', ms=4, mfc=style.SURFACE, mec=style.INK, mew=1),
+         plt.Rectangle((0, 0), 1, 1, color=style.OVER), plt.Rectangle((0, 0), 1, 1, color=style.UNDER),
+         plt.Line2D([], [], color=style.INK, lw=1.2)]
+    fig.legend(h, ['one recording', 'mean (person, or all recordings): radar too high', 'mean: radar too low',
+                   'all: 10th–90th percentile of recordings'], ncol=4, loc='outside lower center')
+    fig.suptitle(f'{title}: signed error per person ({e.rec.nunique()} recordings, {len(persons)} people)', x=0.01,
+                 ha='left', fontsize=12, fontweight='bold')
     fig.savefig(path, dpi=160)
+
+
+def bouts_bias_figure(errors, persons, path, panels=BOUT_PANELS):
+    """Category 2: one panel per metric, signed error per person in % of MoCap (signed_error_figure). errors: per
+    recording and metric, rec, person, mocap and err = 100 x (radar - MoCap) / MoCap; persons in plotting order."""
+    signed_error_figure(errors, persons, panels, path, 'Category 2', unit='%')
 
 
 SETUP_LABELS = {'A': 'A: LOSO', 'B': 'B: LOSO + clip', 'C': 'C: LOSO + other recordings + clip'}
