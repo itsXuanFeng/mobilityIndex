@@ -34,9 +34,9 @@ flowchart LR
 
 **Activity level.** Let $n_t$ be the number of moving cells in frame $t$. The activity level $L_e$ of an epoch $e$ (one second) is the mean log count over its frames. The epoch is active when this level exceeds a threshold $\theta$:
 
-$$n_t = \bigl\lvert \lbrace (r,v) : P_t(r,v) > B(r,v) + \delta \rbrace \bigr\rvert, \qquad L_e = \operatorname{mean}_{t \in e} \log(n_t + c), \qquad a_e = \mathbf{1}[L_e > \theta]$$
+$$n_t = \bigl\lvert \lbrace (r,v) : P_t(r,v) > B(r,v) + \delta \rbrace \bigr\rvert, \qquad L_e = \frac{1}{\lvert e \rvert} \sum_{t \in e} \log(n_t + c), \qquad a_e = \mathbf{1}[L_e > \theta]$$
 
-The constant $c$ is a small offset that prevents nearly empty frames from dominating the mean. Active and inactive time follow by summation over the epochs, with $\Delta$ the epoch length:
+Here $\lvert e \rvert$ is the number of frames in the epoch, and the constant $c$ is a small offset that prevents nearly empty frames from dominating the mean. Active and inactive time follow by summation over the epochs, with $\Delta$ the epoch length:
 
 $$T_{\text{active}} = \Delta \sum_e a_e, \qquad T_{\text{inactive}} = \Delta \sum_e (1 - a_e)$$
 
