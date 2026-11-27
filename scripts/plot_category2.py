@@ -74,7 +74,7 @@ if __name__ == '__main__':
         start = formation_figure(*formation_inputs(args.example), paths['formation'], start=args.start)
         print(f'formation: {args.example}, segment from epoch {start}')
         print('matching:', matching_figure(bouts, scores, paths['matching']))
-        print('metrics (median |error| %, mean bias %):', metrics_figure(mt, paths['metrics']))
+        print('metrics (MAE, bias, MAE % of mean MoCap):', metrics_figure(mt, paths['metrics']))
         table = per_participant_table(mt, scores, person_of)
         print('per participant (medians):', per_participant_figure(table, paths['per_participant']))
         print('checks:', checks_figure(eps, bouts, paths['checks']))

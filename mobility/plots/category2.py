@@ -3,7 +3,8 @@ Category 2 result figures (scripts/plot_category2.py), from the tables of the ca
     formation_figure        one segment of one recording: the radar's distance-corrected level with the entry, exit and
                             confirmation thresholds, the candidate runs kept as bouts or rejected, the radar's posture
                             transitions, and the radar and MoCap bouts
-    matching_figure         matched bouts: start and end error (radar - MoCap); per recording bout precision, recall, F1
+    matching_figure         matched bouts: share whose start and end lie within k s of MoCap; per recording bout
+                            precision, recall, F1
     metrics_figure          per recording: the four metrics, radar vs MoCap, against the identity line
     per_participant_figure  per participant: bout F1, and the error of each metric over their recordings
     checks_figure           bouts against the script labels (F1, radar vs MoCap); bout count error in and out of bed
@@ -23,11 +24,6 @@ METRICS = [  # metric, title, unit
     ('bout_duration_var', 'Variance of bout duration', 's²'),
     ('fragmentation_index', 'Fragmentation index', ''),
 ]
-
-
-def _relative(g):
-    """per recording: (radar - MoCap) / MoCap"""
-    return (g.radar - g.mocap) / g.mocap
 
 
 def _strip(ax, i, x, rng, label_fmt, horizontal=True):
@@ -101,24 +97,26 @@ def matching_figure(bouts, scores, path):
     """bouts: bouts.csv; scores: bout_scores.csv of the category2 run"""
     m = bouts[(bouts.source == 'radar') & bouts.onset_err_s.notna()]
     style.apply()
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3.8), constrained_layout=True,
-                             gridspec_kw=dict(width_ratios=[2, 2, 1.4]))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.9), constrained_layout=True, gridspec_kw=dict(width_ratios=[1.5, 1]))
     out = {}
-    k = np.arange(-4, 5)
-    for ax, col, name in [(axes[0], 'onset_err_s', 'Start of matched bouts'), (axes[1], 'offset_err_s',
-                                                                              'End of matched bouts')]:
-        v = m[col].clip(-4, 4)
-        share = np.array([(v == i).mean() for i in k])
-        ax.bar(k, share, 0.8, color=style.RADAR, edgecolor=style.SURFACE)
-        ax.set_xticks(k, [f'≤{i}' if i == k[0] else f'≥+{i}' if i == k[-1] else f'{i:+d}' if i else '0' for i in k])
-        ax.yaxis.set_major_formatter(lambda y, _: f'{y:.0%}')
-        ax.set_xlabel('radar − MoCap (s)')
-        ax.set_ylabel('share of matched bouts')
-        ax.grid(axis='x', visible=False)
-        exact, within = (m[col] == 0).mean(), (m[col].abs() <= 1).mean()
-        ax.set_title(f'{name}: {exact:.0%} exact, {within:.0%} within 1 s')
-        out[col] = (exact, within)
-    ax = axes[2]
+    ax = axes[0]
+    k = np.arange(0, 4)
+    for col, name, colour, dx, dy, ha in [('onset_err_s', 'start of the bout', style.SLOTS[0], -0.08, 0.01, 'right'),
+                                          ('offset_err_s', 'end of the bout', style.SLOTS[1], 0.08, -0.035, 'left')]:
+        share = [(m[col].abs() <= i).mean() for i in k]
+        ax.plot(k, share, 'o-', color=colour, lw=2, ms=7, label=name)
+        for i, s in zip(k, share):
+            ax.text(i + dx, s + dy, f'{s:.0%}', ha=ha, fontsize=8, color=style.INK_2)
+        out[col] = [round(s, 3) for s in share]
+    ax.set_xticks(k, ['exact', '≤ 1 s', '≤ 2 s', '≤ 3 s'])
+    ax.set_xlim(-0.45, 3.4)
+    ax.set_ylim(0.6, 1.03)
+    ax.yaxis.set_major_formatter(lambda y, _: f'{y:.0%}')
+    ax.set_xlabel('absolute difference, radar − MoCap')
+    ax.set_ylabel('share of matched bouts')
+    ax.legend(loc='lower right')
+    ax.set_title(f'Bout boundaries ({len(m):,} matched bouts)')
+    ax = axes[1]
     rng = np.random.default_rng(0)
     for i, (col, lab) in enumerate([('bout_precision', 'precision'), ('bout_recall', 'recall'), ('bout_f1', 'F1')]):
         v = scores[col].dropna()
@@ -136,8 +134,12 @@ def matching_figure(bouts, scores, path):
     return out
 
 
+FORMATS = dict(n_bouts='.2f', bout_duration_mean='.2f', bout_duration_var='.1f', fragmentation_index='.3f')
+
+
 def metrics_figure(mt, path):
-    """mt: metrics.csv of the category2 run"""
+    """mt: metrics.csv of the category2 run. Per metric: mean absolute error and bias over the recordings, in the
+    metric's unit; the error also in % of the mean MoCap value"""
     style.apply()
     rng = np.random.default_rng(0)
     fig, axes = plt.subplots(1, 4, figsize=(15, 4.3), constrained_layout=True)
@@ -149,9 +151,11 @@ def metrics_figure(mt, path):
         ax.plot([lo, hi], [lo, hi], color=style.INK_2, lw=1)
         ax.scatter(g.mocap + jit(len(g)), g.radar + jit(len(g)), s=14, color=style.RADAR, edgecolor=style.SURFACE,
                    linewidth=0.5, zorder=2)
-        rel = _relative(g)
-        out[k] = (100 * rel.abs().median(), 100 * rel.mean())
-        ax.text(0.04, 0.96, f'median error {100 * rel.abs().median():.1f}%\nmean bias {100 * rel.mean():+.1f}%',
+        d = g.radar - g.mocap
+        mae, bias, pct = d.abs().mean(), d.mean(), 100 * d.abs().mean() / g.mocap.mean()
+        out[k] = (mae, bias, pct)
+        fmt, u_ = FORMATS[k], f' {unit}' if unit else ''
+        ax.text(0.04, 0.96, f'mean absolute error {mae:{fmt}}{u_} ({pct:.1f}%)\nbias {bias:+{fmt}}{u_}',
                 transform=ax.transAxes, va='top', fontsize=8, color=style.INK_2)
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)

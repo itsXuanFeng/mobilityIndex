@@ -92,7 +92,7 @@ The metrics are computed as for the radar.
 ## Validation
 
 - **Bout level.** Radar bouts are matched one-to-one to MoCap bouts by their intersection over union. The start and end times of matched bouts are then compared.
-- **Recording level.** The four metrics of the radar and of MoCap are compared per recording, through the relative error (radar − MoCap) / MoCap.
+- **Recording level.** The four metrics of the radar and of MoCap are compared per recording, through the mean absolute error and the bias (radar − MoCap).
 - **Script labels.** The bouts of both sensors are compared with the activity labels of the script, a reference that does not depend on MoCap.
 - **In bed and out of bed.** The agreement is reported separately for the two situations, using the radar's own posture.
 - **Consistency with Category 3.** Each posture transition should fall inside a bout of the same sensor.
@@ -114,22 +114,24 @@ The evaluation covers the same 148 recordings of 27 participants as Category 1. 
 **Bout-level agreement.** Of the 3,400 MoCap bouts, 3,154 are matched one-to-one by a radar bout, a pooled F1 score of 0.92 (Figure 2). Per recording, the median precision is 0.92, the median recall 0.95 and the median F1 0.93. Matched bouts have accurate boundaries:
 
 - the start is exact in 80% of the bouts, and within one second in 99%;
-- the end is exact in 74%, and within one second in 94%.
+- the end is exact in 74%, within one second in 94%, and within three seconds in 98%.
 
 The ends are slightly less precise than the starts.
 
 ![Figure 2](figures/c2_matching.png)
 
-*Figure 2. Left and middle: start and end error of the matched bouts, radar − MoCap, in epochs of one second. Right: precision, recall and F1 of the bout matching per recording, one dot each; the bar marks the median.*
+*Figure 2. Left: share of the matched bouts whose start and end lie within a given number of seconds of MoCap's (epochs of one second; "exact" means the same epoch). Right: precision, recall and F1 of the bout matching per recording, one dot each; the bar marks the median.*
 
-**Metrics per recording.** Figure 3 compares the four metrics recording by recording. The median relative errors are:
+**Metrics per recording.** Figure 3 compares the four metrics recording by recording. The mean absolute errors, with the error in % of the mean MoCap value, and the biases are:
 
-- number of bouts: 4.2%;
-- mean bout duration: 6.3%;
-- variance of bout duration: 9.0%;
-- fragmentation index: 7.4%.
+| Metric | Mean absolute error | Bias (radar − MoCap) |
+|---|---|---|
+| Number of bouts | 1.1 bouts (4.9%) | +0.4 bouts |
+| Mean bout duration | 0.55 s (7.8%) | −0.41 s |
+| Variance of bout duration | 6.5 s² (14.7%) | −1.8 s² |
+| Fragmentation index | 0.012 (9.7%) | −0.004 |
 
-The number of bouts has a small positive bias (+2.0%). The mean bout duration has a negative bias (−5.5%): radar bouts are slightly shorter than MoCap bouts, with a median bout of 4 s against 5 s. The variance is the least precise metric, as expected for a second moment: a single long bout weighs heavily on it.
+The radar finds slightly more bouts than MoCap, and its bouts are slightly shorter, with a median bout of 4 s against 5 s. The variance is the least precise metric, as expected for a second moment: a single long bout weighs heavily on it.
 
 ![Figure 3](figures/c2_metrics.png)
 
@@ -144,7 +146,7 @@ The number of bouts has a small positive bias (+2.0%). The mean bout duration ha
 **Additional checks.** Figure 5 shows the first two of three further checks.
 
 - **Script labels.** Against the activity labels of the script, a reference independent of MoCap, the radar bouts reach a median F1 score of 0.914 per recording, against 0.919 for the MoCap bouts. The radar thus agrees with the script almost as well as MoCap does.
-- **In bed and out of bed.** Out of bed, the radar detects slightly fewer bouts than MoCap (−0.39 per recording on average). In bed, it detects more (+0.82): the radar counts small settling movements under the blanket as bouts, which MoCap does not.
+- **In bed and out of bed.** Out of bed, the radar detects slightly fewer bouts than MoCap (−0.39 per recording on average). In bed, it detects more (+0.82): the radar might count small settling movements under the blanket as bouts, which MoCap does not.
 - **Consistency with Category 3.** Of the posture transitions, 97% of the radar's and 99% of MoCap's fall inside a bout of the same sensor (not shown).
 
 ![Figure 5](figures/c2_checks.png)
