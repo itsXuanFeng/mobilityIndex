@@ -100,20 +100,33 @@ def matching_figure(bouts, scores, path):
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.9), constrained_layout=True, gridspec_kw=dict(width_ratios=[1.5, 1]))
     out = {}
     ax = axes[0]
-    k = np.arange(0, 4)
-    for col, name, colour, dx, dy, ha in [('onset_err_s', 'start of the bout', style.SLOTS[0], -0.08, 0.01, 'right'),
-                                          ('offset_err_s', 'end of the bout', style.SLOTS[1], 0.08, -0.035, 'left')]:
-        share = [(m[col].abs() <= i).mean() for i in k]
-        ax.plot(k, share, 'o-', color=colour, lw=2, ms=7, label=name)
-        for i, s in zip(k, share):
-            ax.text(i + dx, s + dy, f'{s:.0%}', ha=ha, fontsize=8, color=style.INK_2)
-        out[col] = [round(s, 3) for s in share]
-    ax.set_xticks(k, ['exact', '≤ 1 s', '≤ 2 s', '≤ 3 s'])
-    ax.set_xlim(-0.45, 3.4)
-    ax.set_ylim(0.6, 1.03)
+    kmax = int(max(m.onset_err_s.abs().max(), m.offset_err_s.abs().max()))
+    k = np.arange(0, kmax + 2)
+    lines = []
+    # labelled points (epoch k, x offset, y offset, alignment), placed clear of both curves and the axis
+    marks = dict(onset_err_s=[(0, 0.15, 0.012, 'left'), (1, -0.15, 0.0, 'right')],
+                 offset_err_s=[(0, 0.15, -0.014, 'left'), (1, -0.15, 0.0, 'right'), (2, 0.15, -0.012, 'left'),
+                               (3, 0.15, -0.012, 'left')])
+    for col, name, colour in [('onset_err_s', 'start', style.SLOTS[0]), ('offset_err_s', 'end', style.SLOTS[1])]:
+        a = m[col].abs()
+        share = np.array([(a <= i).mean() for i in k])        # the full cumulative distribution, up to 100%
+        full = int(a.max())
+        ax.step(k, share, where='post', color=colour, lw=2, label=f'{name} of the bout')
+        for i, dx, dy, ha in marks[col]:
+            ax.plot(i, share[i], 'o', color=colour, ms=6)
+            ax.text(i + dx, share[i] + dy, f'{share[i]:.0%}', ha=ha, va='center', fontsize=8, color=style.INK)
+        ax.plot(full, 1.0, 'o', color=colour, ms=6)
+        lines.append(f'every {name} within {full} s')
+        out[col] = dict(exact=round(share[0], 3), within_1s=round(share[1], 3), within_3s=round(share[3], 3),
+                        all_within_s=full)
+    ax.text(0.97, 0.3, '\n'.join(lines), transform=ax.transAxes, ha='right', va='center', fontsize=8,
+            color=style.INK_2)
+    ax.set_xlim(-0.5, kmax + 1.5)
+    ax.set_xticks(range(0, kmax + 2, 2))
+    ax.set_ylim(0.7, 1.03)
     ax.yaxis.set_major_formatter(lambda y, _: f'{y:.0%}')
-    ax.set_xlabel('absolute difference, radar − MoCap')
-    ax.set_ylabel('share of matched bouts')
+    ax.set_xlabel('absolute difference, radar − MoCap (s; 0 = same epoch)')
+    ax.set_ylabel('share of matched bouts within')
     ax.legend(loc='lower right')
     ax.set_title(f'Bout boundaries ({len(m):,} matched bouts)')
     ax = axes[1]

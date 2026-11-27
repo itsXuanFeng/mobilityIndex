@@ -116,11 +116,11 @@ The evaluation covers the same 148 recordings of 27 participants as Category 1. 
 - the start is exact in 80% of the bouts, and within one second in 99%;
 - the end is exact in 74%, within one second in 94%, and within three seconds in 98%.
 
-The ends are slightly less precise than the starts.
+The ends are slightly less precise than the starts. The remaining differences form a thin tail: every start lies within 15 s and every end within 19 s of MoCap's.
 
 ![Figure 2](figures/c2_matching.png)
 
-*Figure 2. Left: share of the matched bouts whose start and end lie within a given number of seconds of MoCap's (epochs of one second; "exact" means the same epoch). Right: precision, recall and F1 of the bout matching per recording, one dot each; the bar marks the median.*
+*Figure 2. Left: cumulative share of the matched bouts whose start and end lie within a given number of seconds of MoCap's, up to the largest difference (epochs of one second; 0 means the same epoch). Right: precision, recall and F1 of the bout matching per recording, one dot each; the bar marks the median.*
 
 **Metrics per recording.** Figure 3 compares the four metrics recording by recording. The mean absolute errors, with the error in % of the mean MoCap value, and the biases are:
 
