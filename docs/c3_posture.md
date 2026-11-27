@@ -23,8 +23,6 @@ flowchart LR
 
 ## Localisation of the person
 
-**Why direction is needed.** Range and Doppler alone do not locate a reflection. A reflection at a given range may come from a person standing far from the radar axis, or from a person sitting directly below the radar.
-
 **Angle of arrival.** The radar's antennas form a 2-D virtual array of 12 channels (3 transmitters × 4 receivers), spaced half a wavelength apart. A reflection from direction $(u, v)$, the direction cosines along the two array axes, produces a phase difference of $\pi u$ between neighbouring channels along the first axis, and of $\pi v$ along the second. For each range–Doppler cell with channel values $x_c$, the direction cosine is estimated as
 
 $$u = \frac{1}{\pi} \arg \sum_{(c, c')} \overline{x_c} x_{c'}$$
@@ -38,18 +36,16 @@ where the sum runs over the channel pairs $(c, c')$ that are one element apart a
 
 $$(x, z) = (x_0, z_0) + r (u, v), \qquad h = H - r \sqrt{1 - u^2 - v^2}$$
 
-Here $(x_0, z_0)$ is the point directly below the radar and $H$ is the mounting height. The radar's orientation in the room is fitted once against MoCap.
+Here $`(x_0, z_0)`$ is the point directly below the radar and $H$ is the mounting height. The radar's orientation in the room is fitted once against MoCap.
 
 **Point cloud of the person.** In each frame, every cell above its background becomes a point, whether it is moving or reflects breathing. The person's points are those within a fixed radius of the median position. They provide the activity energy of [Category 1](c1_movement.md) and the body heights below.
-
-**Data handling.** The first pass over the raw data averages the channels and loses the direction. The raw data are therefore read a second time, and only the channel values of the retained cells are stored. The direction estimation can thus be revised without reprocessing the raw data.
 
 ## Posture estimation
 
 **Height features.** A ceiling radar measures the height of the upper body directly. This height is high when standing, lower when sitting, and lowest when lying or on the floor. Range alone confounds height with horizontal distance, so a person far from the radar would appear lower than they are. In each frame, two features are computed from the heights $h_i$ of the person's points:
 
-- the upper height $h^{\text{top}}_t$, a high quantile of the $h_i$;
-- the median height $h^{\text{mid}}_t$.
+- the upper height $`h^{\text{top}}_t`$, a high quantile of the $h_i$;
+- the median height $`h^{\text{mid}}_t`$.
 
 The median height separates lying in bed from lying on the floor. Point-cloud height has been used as a posture and fall cue in earlier mmWave radar work [2].
 
@@ -62,13 +58,13 @@ The median height separates lying in bed from lying on the floor. Point-cloud he
   The log-likelihood of each frame is down-weighted, because consecutive frames are not independent. Breathing and small movements keep a still person visible most of the time. When the person is not detected, the frame carries no evidence and the posture persists.
 - **Durations.** A posture lasts at least $d_{\min}$, the same minimum as in the MoCap definition. After this minimum, it ends at each frame with probability $p_{\text{move}}$ while the person moves (Category 1), and with a much smaller probability $p_{\text{still}}$ otherwise.
 - **Transitions between states.** All posture changes are allowed and equally likely, including a change from a chair or bed directly to the floor. The model therefore learns nothing about the order of the scripted tasks.
-- **Decoding.** The posture sequence is the most likely one, $\hat{k}_{1:T} = \arg\max_{k_{1:T}} P(k_{1:T} \mid y_{1:T})$, found with the Viterbi algorithm.
+- **Decoding.** The posture sequence is the most likely one, $`\hat{k}_{1:T} = \arg\max_{k_{1:T}} P(k_{1:T} \mid y_{1:T})`$, found with the Viterbi algorithm.
 
 **Metrics.** The three metrics follow from the decoded posture.
 
-- **Time in posture $k$:** $T_k = \Delta \sum_e \mathbf{1}[\hat{k}_e = k]$, where $\hat{k}_e$ is the most frequent posture in epoch $e$.
-- **Transitions:** the frames where $\hat{k}_t \ne \hat{k}_{t-1}$.
-- **Peak speed:** per frame, $v^{(q)}_t$ is the power-weighted $q$-quantile of the radial speeds of the person's moving points. This is the percentile method for micro-Doppler envelopes. A quantile is used instead of the maximum because strong reflections leak power into neighbouring Doppler bins. The peak of a transition at time $t_0$ is $v_{\text{peak}} = \max_{\lvert t - t_0 \rvert \le \tau} v^{(q)}_t$. The metric is the mean peak over the transitions of a recording.
+- **Time in posture $k$:** $`T_k = \Delta \sum_e \mathbf{1}[\hat{k}_e = k]`$, where $`\hat{k}_e`$ is the most frequent posture in epoch $e$.
+- **Transitions:** the frames where $`\hat{k}_t \ne \hat{k}_{t-1}`$.
+- **Peak speed:** per frame, $`v^{(q)}_t`$ is the power-weighted $q$-quantile of the radial speeds of the person's moving points. This is the percentile method for micro-Doppler envelopes. A quantile is used instead of the maximum because strong reflections leak power into neighbouring Doppler bins. The peak of a transition at time $t_0$ is $`v_{\text{peak}} = \max_{\lvert t - t_0 \rvert \le \tau} v^{(q)}_t`$. The metric is the mean peak over the transitions of a recording.
 
 **Calibration.** All parameters are calibrated with leave-one-subject-out cross-validation.
 
@@ -97,8 +93,8 @@ flowchart LR
 
 Let $h_{\text{pelvis}}$ and $h_{\text{knee}}$ be the heights of the pelvis and the knees, and $\alpha$ the inclination of the trunk from vertical (hips to neck). The rule is applied in this order:
 
-1. **standing** if $h_{\text{pelvis}} > \eta_{\text{stand}}$;
-2. otherwise **floor** if $\min(h_{\text{pelvis}}, h_{\text{knee}}) < \eta_{\text{floor}}$ (lying, sitting or kneeling on the ground);
+1. **standing** if $`h_{\text{pelvis}} > \eta_{\text{stand}}`$;
+2. otherwise **floor** if $`\min(h_{\text{pelvis}}, h_{\text{knee}}) < \eta_{\text{floor}}`$ (lying, sitting or kneeling on the ground);
 3. otherwise **lying** if $\alpha > \alpha_{\text{lie}}$;
 4. otherwise **sitting** (on a chair, on the edge of the bed, or upright in bed).
 

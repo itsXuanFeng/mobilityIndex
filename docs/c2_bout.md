@@ -27,26 +27,26 @@ The radar and the MoCap reference follow the same steps, each on its own activit
 
 ## Bout detection
 
-Bouts are detected on the per-epoch activity level $L_e$ of [Category 1](c1_movement.md), with the posture transitions of [Category 3](c3_posture.md) as additional evidence. The rule is a one-dimensional form of hysteresis thresholding. It uses three thresholds, $\theta_{\text{exit}} < \theta < \theta_{\text{conf}}$:
+Bouts are detected on the per-epoch activity level $L_e$ of [Category 1](c1_movement.md), with the posture transitions of [Category 3](c3_posture.md) as additional evidence. The rule is a one-dimensional form of hysteresis thresholding. It uses three thresholds, $`\theta_{\text{exit}} < \theta < \theta_{\text{conf}}`$:
 
 1. **Start.** A bout starts when the level exceeds the entry threshold: $L_e > \theta$.
-2. **End.** The bout ends when the level falls to the exit threshold: $L_e \le \theta_{\text{exit}}$. A short pause therefore does not split one movement into two bouts.
-3. **Confirmation.** A candidate bout $b$ is kept only if its level exceeds the confirmation threshold at least once: $\max_{e \in b} L_e > \theta_{\text{conf}}$. This removes small movements that barely cross the entry threshold. A posture transition within the bout (sitting up, standing up, lying down) also confirms it, since a change of posture is a whole-body movement even when it is slow or under a blanket.
+2. **End.** The bout ends when the level falls to the exit threshold: $`L_e \le \theta_{\text{exit}}`$. A short pause therefore does not split one movement into two bouts.
+3. **Confirmation.** A candidate bout $b$ is kept only if its level exceeds the confirmation threshold at least once: $`\max_{e \in b} L_e > \theta_{\text{conf}}`$. This removes small movements that barely cross the entry threshold. A posture transition within the bout (sitting up, standing up, lying down) also confirms it, since a change of posture is a whole-body movement even when it is slow or under a blanket.
 4. **Post-processing.** Short gaps between bouts may be filled and short bouts removed, as in interruption-tolerant bout definitions [4]. The calibration currently selects neither step, because the confirmation already removes such short events.
 
 **Distance correction (radar).** For the same movement, the number of cells above the background decreases with the distance between the person and the radar. The radar therefore corrects its level with its own estimate of the distance $d_e$ to the person:
 
 $$\tilde{L}_e = L_e + b \log \frac{d_e}{d_0}$$
 
-where $d_0$ is a reference distance. The slope $b$ is estimated by least squares, as the dependence of the radar level on the log distance at a given MoCap level. The rule above is applied to $\tilde{L}_e$ with a single margin $\kappa$: $\theta_{\text{exit}} = \theta - \kappa$ and $\theta_{\text{conf}} = \theta + \kappa$.
+where $d_0$ is a reference distance. The slope $b$ is estimated by least squares, as the dependence of the radar level on the log distance at a given MoCap level. The rule above is applied to $`\tilde{L}_e`$ with a single margin $\kappa$: $\theta_{\text{exit}} = \theta - \kappa$ and $\theta_{\text{conf}} = \theta + \kappa$.
 
-**Metrics.** For $N$ bouts with durations $D_1, \dots, D_N$:
+**Metrics.** For $N$ bouts with durations $`D_1, \dots, D_N`$:
 
 $$\bar{D} = \frac{1}{N} \sum_i D_i, \qquad s_D^2 = \frac{1}{N-1} \sum_i (D_i - \bar{D})^2, \qquad F = \Pr(\text{bout at } e+1 \mid \text{rest at } e)$$
 
 The fragmentation index $F$ is the transition probability from rest to activity. It is estimated as the share of resting epochs that are followed by a bout epoch.
 
-**Choice of the transition direction.** Accelerometry studies often use the opposite direction: the active-to-sedentary transition probability (ASTP) [1, 5]. The following counting argument shows why ASTP adds no information to $\bar{D}$. Consider a recording with $N$ bouts of durations $D_1, \dots, D_N$ and a total resting time $R$, with epochs of length $\Delta$.
+**Choice of the transition direction.** Accelerometry studies often use the opposite direction: the active-to-sedentary transition probability (ASTP) [1, 5]. The following counting argument shows why ASTP adds no information to $\bar{D}$. Consider a recording with $N$ bouts of durations $`D_1, \dots, D_N`$ and a total resting time $R$, with epochs of length $\Delta$.
 
 - **ASTP.** A bout of duration $D_i$ contains $D_i / \Delta$ active epochs. Only its last epoch is followed by a rest epoch. ASTP is the number of such epochs divided by the number of active epochs:
 
@@ -84,7 +84,7 @@ flowchart LR
 MoCap has no distance correction.
 
 - **Entry threshold:** the Category 1 MoCap threshold $\theta_{\text{M}}$.
-- **Exit and confirmation thresholds:** multiples of it, $\theta_{\text{exit}} = f_{\text{exit}} \theta_{\text{M}}$ and $\theta_{\text{conf}} = f_{\text{conf}} \theta_{\text{M}}$.
+- **Exit and confirmation thresholds:** multiples of it, $`\theta_{\text{exit}} = f_{\text{exit}} \theta_{\text{M}}`$ and $`\theta_{\text{conf}} = f_{\text{conf}} \theta_{\text{M}}`$.
 - **Calibration:** the two factors and the post-processing are chosen to maximise the balanced accuracy of the bouts against the activity labels. Epochs of whole-body tasks should fall inside bouts, and epochs of arm-only tasks and waiting outside them.
 
 The metrics are computed as for the radar.

@@ -40,7 +40,7 @@ Here $\lvert e \rvert$ is the number of frames in the epoch, and the constant $c
 
 $$T_{\text{active}} = \Delta \sum_e a_e, \qquad T_{\text{inactive}} = \Delta \sum_e (1 - a_e)$$
 
-**Activity energy.** The angle of arrival of each reflection gives its 3-D position ([Localisation of the person](c3_posture.md#localisation-of-the-person)). The person's points $\mathcal{P}_t$ are the points within a fixed radius of their median position. The energy combines two terms:
+**Activity energy.** The angle of arrival of each reflection gives its 3-D position ([Localisation of the person](c3_posture.md#localisation-of-the-person)). The person's points $`\mathcal{P}_t`$ are the points within a fixed radius of their median position. The energy combines two terms:
 
 - the mean squared radial velocity $v_i^2$ of these points;
 - the squared horizontal speed $u_t$ of the person's position.
@@ -49,7 +49,7 @@ The second term is needed because a radar viewing from above measures horizontal
 
 $$e_t = \frac{1}{\lvert \mathcal{P}_t \rvert} \sum_{i \in \mathcal{P}_t} v_i^2 + u_t^2, \qquad E = \Delta \sum_e \bar{e}_e$$
 
-where $\bar{e}_e$ is the mean of $e_t$ over epoch $e$. This quantity is the radar counterpart of the mean squared joint speed of the reference (below), a proxy for kinetic energy.
+where $`\bar{e}_e`$ is the mean of $e_t$ over epoch $e$. This quantity is the radar counterpart of the mean squared joint speed of the reference (below), a proxy for kinetic energy.
 
 **Online operation.** The current background estimate uses the whole recording. A causal variant uses only past frames: a running percentile per cell followed by a two-dimensional smallest-of CFAR detector. It has been prototyped with equal performance, but it is not yet part of the pipeline.
 
@@ -71,7 +71,7 @@ flowchart LR
 
 **Subject track.** The subject is the track with the longest path of its centre of gravity inside the room. This rule rejects static ghost tracks.
 
-**Joint velocities and energy.** The joint velocities $\mathbf{v}_j(t)$ of the $J$ joints are obtained with a Savitzky–Golay derivative filter. The energy is the mean squared joint speed. An epoch is active when its RMS joint speed exceeds a threshold $\theta_{\text{M}}$:
+**Joint velocities and energy.** The joint velocities $`\mathbf{v}_j(t)`$ of the $J$ joints are obtained with a Savitzky–Golay derivative filter. The energy is the mean squared joint speed. An epoch is active when its RMS joint speed exceeds a threshold $\theta_{\text{M}}$:
 
 $$e^{\text{M}}_t = \frac{1}{J} \sum_j \lVert \mathbf{v}_j(t) \rVert^2, \qquad a^{\text{M}}_e = \mathbf{1}\Bigl[\sqrt{\bar{e}^{\text{M}}_e} > \theta_{\text{M}}\Bigr], \qquad E^{\text{M}} = \Delta \sum_e \bar{e}^{\text{M}}_e$$
 
