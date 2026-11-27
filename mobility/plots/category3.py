@@ -1,15 +1,12 @@
 """
-Category 3 result figures (scripts/plot_category3.py), from the tables of the category3 run and the angle check:
-    localisation_figure     height error of the radar's nearest moving reflector against the nearest MoCap joint,
-                            from the angle of arrival and from the range alone, by distance from the radar axis
+Category 3 result figures (scripts/plot_category3.py), from the tables of the category3 run:
     timeline_figure         one recording: posture of both sensors with their transitions; the radar's upper and median
                             heights and the MoCap head height
-    posture_figure          posture per epoch: confusion matrix (row %), and F1 per posture and recording
+    posture_figure          posture per epoch: confusion matrix (epoch counts), and F1 per posture and recording
     posture_time_figure     time in each posture per recording, radar vs MoCap
-    transitions_figure      transitions: F1 per type, timing error of matched transitions, share found by distance from
-                            the radar axis
+    transitions_figure      transitions: F1 per type, timing error of matched transitions
     peak_figure             peak radial speed: per matched transition, and the metric per recording
-    per_participant_figure  per participant: posture and transition F1, posture-time and peak-speed errors
+    per_participant_figure  per participant: posture and transition F1; posture-time and peak-speed errors in %
 No participant IDs on the figures: they are for the public docs.
 """
 import matplotlib.pyplot as plt
@@ -23,7 +20,6 @@ POSTURE_NAMES = ['standing', 'sitting', 'lying', 'floor']
 KINDS = [('sit_to_stand', 'sit → stand'), ('stand_to_sit', 'stand → sit'), ('sit_to_lie', 'sit → lie'),
          ('lie_to_sit', 'lie → sit'), ('to_floor', 'to the floor'), ('from_floor', 'from the floor')]
 COUNTED = [('sit_to_stand', 'sit → stand'), ('stand_to_sit', 'stand → sit'), ('lie_to_sit', 'lie → sit')]
-OFFAXIS_BINS = [0, 0.5, 1.0, 1.5, 2.0, 3.0]
 
 
 def _identity_scatter(ax, x, y, text, lo=0, pad=1.05, **kw):
@@ -42,36 +38,11 @@ def _strip(ax, i, x, rng, fmt):
     x = x[~np.isnan(x)]
     ax.plot(x, i + rng.uniform(-0.15, 0.15, len(x)), 'o', ms=6, color=style.RADAR, mec=style.SURFACE, mew=0.8,
             zorder=2)
-    med = np.median(x)
+    med, mean = np.median(x), np.mean(x)
     ax.plot([med, med], [i - 0.3, i + 0.3], color=style.INK, lw=2, zorder=3)
-    ax.text(med, i + 0.33, 'median ' + fmt.format(med), ha='center', va='top', fontsize=8, color=style.INK_2)
-    return med
-
-
-def localisation_figure(errors, path, bins=(0, 0.5, 1, 1.5, 2, 3, 5)):
-    """errors: errors.csv of the radar_orientation run (per frame: height_angle, height_range, horizontal, offaxis)"""
-    style.apply()
-    g = errors.groupby(pd.cut(errors.offaxis, list(bins)), observed=True).agg(
-        n=('offaxis', 'size'), angle=('height_angle', lambda v: 100 * v.abs().median()),
-        rng=('height_range', lambda v: 100 * v.abs().median()), horizontal=('horizontal', lambda v: 100 * v.median()))
-    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
-    x = np.arange(len(g))
-    ax.bar(x - 0.2, g.rng, 0.4, color=style.MUTED, label='height from the range alone')
-    ax.bar(x + 0.2, g.angle, 0.4, color=style.RADAR, label='height with the angle of arrival')
-    for i, r in enumerate(g.itertuples()):
-        ax.text(i + 0.2, r.angle + 3, f'{r.angle:.0f}', ha='center', va='bottom', fontsize=8, color=style.INK_2)
-        ax.text(i - 0.2, r.rng + 3, f'{r.rng:.0f}', ha='center', va='bottom', fontsize=8, color=style.INK_2)
-    ax.set_xticks(x, [f'{iv.left:g}–{iv.right:g}' for iv in g.index])
-    ax.set_xlabel('distance of the MoCap joint from the radar axis (m)')
-    ax.set_ylabel('median absolute height error (cm)')
-    ax.grid(axis='x', visible=False)
-    ax.legend(loc='upper left')
-    ax.set_title(f'Height of the nearest moving reflection against the nearest joint ({len(errors):,} frames)')
-    fig.savefig(path, dpi=160)
-    plt.close(fig)
-    return dict(frames=len(errors), horizontal_cm=100 * errors.horizontal.median(),
-                angle_cm=100 * errors.height_angle.abs().median(), range_cm=100 * errors.height_range.abs().median(),
-                by_bin=g.round(0).to_dict('index'))
+    ax.text(med, i + 0.33, f'median {fmt.format(med)}, mean {fmt.format(mean)}', ha='center', va='top', fontsize=8,
+            color=style.INK_2)
+    return med, mean
 
 
 def held_posture(posture, hold):
@@ -132,17 +103,16 @@ def posture_figure(confusion, scores, path):
     ax = axes[0]
     ax.imshow(cmn.values, cmap=LinearSegmentedColormap.from_list('blues', [style.SURFACE] + style.BLUES), vmin=0,
               vmax=1)
-    for i in range(4):
+    for i in range(4):                                  # epoch counts; the shading is the share of the MoCap row
         for j in range(4):
-            v = cmn.values[i, j]
-            ax.text(j, i, f'{v:.1%}', ha='center', va='center', fontsize=9,
-                    color=style.SURFACE if v > 0.6 else style.INK)
+            ax.text(j, i, f'{int(cm.values[i, j]):,}', ha='center', va='center', fontsize=9,
+                    color=style.SURFACE if cmn.values[i, j] > 0.6 else style.INK)
     ax.set_xticks(range(4), POSTURE_NAMES)
-    ax.set_yticks(range(4), POSTURE_NAMES)
+    ax.set_yticks(range(4), [f'{p}\n({int(n):,})' for p, n in zip(POSTURE_NAMES, cm.sum(1))])
     ax.set_xlabel('radar posture')
-    ax.set_ylabel('MoCap posture')
+    ax.set_ylabel('MoCap posture (epochs)')
     ax.grid(False)
-    ax.set_title(f'Posture per epoch, pooled ({int(cm.values.sum()):,} epochs)')
+    ax.set_title(f'Confusion matrix, epochs ({int(cm.values.sum()):,} in total)')
     ax = axes[1]
     rng = np.random.default_rng(0)
     out = dict(diagonal=dict(zip(POSTURE_NAMES, np.diag(cmn.values))), accuracy=np.trace(cm.values) / cm.values.sum())
@@ -156,8 +126,9 @@ def posture_figure(confusion, scores, path):
             ax.plot(np.full(low.sum(), xmin + 0.005), y[low], '<', ms=5, color=style.RADAR)
             ax.text(xmin + 0.015, i - 0.22, f'{low.sum()} below {xmin:g}', fontsize=7, color=style.INK_2)
         ax.plot([v.median()] * 2, [i - 0.3, i + 0.3], color=style.INK, lw=2)
-        ax.text(v.median(), i + 0.33, f'median {v.median():.2f}', ha='center', va='top', fontsize=8, color=style.INK_2)
-        out[f'f1_{p}'] = (v.median(), v.min())
+        ax.text(v.median(), i + 0.33, f'median {v.median():.2f}, mean {v.mean():.2f}', ha='center', va='top', fontsize=8,
+                color=style.INK_2)
+        out[f'f1_{p}'] = (v.median(), v.mean(), v.min())
     ax.set_yticks(range(4), POSTURE_NAMES)
     ax.set_ylim(3.6, -0.6)
     ax.set_xlim(xmin, 1.01)
@@ -170,15 +141,19 @@ def posture_figure(confusion, scores, path):
 
 
 def posture_time_figure(mt, path):
-    """mt: metrics.csv of the category3 run (posture times in min)"""
+    """mt: metrics.csv of the category3 run (posture times in min). Per posture: mean absolute error and bias over the
+    recordings, in s and in % of the mean MoCap time"""
     style.apply()
     fig, axes = plt.subplots(1, 4, figsize=(15, 4.3), constrained_layout=True)
     out = {}
     for ax, p in zip(axes, POSTURE_NAMES):
         g = mt[mt.metric == f'{p}_time']
         d = 60 * (g.radar - g.mocap)
-        out[p] = (d.abs().mean(), d.mean(), 60 * g.mocap.median())
-        _identity_scatter(ax, g.mocap, g.radar, f'mean absolute error {d.abs().mean():.1f} s\nbias {d.mean():+.1f} s')
+        ref = 60 * g.mocap.mean()
+        mae, bias = d.abs().mean(), d.mean()
+        out[p] = dict(mae_s=mae, mae_pct=100 * mae / ref, bias_s=bias, bias_pct=100 * bias / ref, mocap_mean_s=ref)
+        _identity_scatter(ax, g.mocap, g.radar, f'mean absolute error {mae:.1f} s ({100 * mae / ref:.1f}%)\n'
+                                                f'bias {bias:+.1f} s ({100 * bias / ref:+.1f}%)')
         ax.set_xlabel('MoCap (min)')
         ax.set_ylabel('radar (min)')
         ax.set_title('Time ' + (p if p != 'floor' else 'on the floor'))
@@ -190,21 +165,20 @@ def posture_time_figure(mt, path):
 def transitions_figure(per_kind, events, path):
     """per_kind: per_kind.csv; events: events.csv of the category3 run"""
     style.apply()
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), constrained_layout=True,
-                             gridspec_kw=dict(width_ratios=[1.5, 1.2, 1.1]))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), constrained_layout=True, gridspec_kw=dict(width_ratios=[1.2, 1]))
     out = {}
     ax = axes[0]
     k = per_kind.set_index('kind').loc[[c for c, _ in KINDS]]
     y = np.arange(len(k))
     ax.barh(y, k.f1, 0.6, color=style.RADAR)
-    for i, r in enumerate(k.itertuples()):
-        ax.text(r.f1 + 0.008, i, f'{r.f1:.2f}  ({r.matched} of {r.mocap})', va='center', fontsize=8, color=style.INK_2)
+    for i, r in enumerate(k.itertuples()):          # the value inside the end of its bar
+        ax.text(r.f1 - 0.01, i, f'{r.f1:.2f}', ha='right', va='center', fontsize=9, color=style.SURFACE)
     ax.set_yticks(y, [n for _, n in KINDS])
     ax.invert_yaxis()
-    ax.set_xlim(0.5, 1.12)
-    ax.set_xlabel('F1 score (same type, within the tolerance)')
+    ax.set_xlim(0.5, 1.0)
+    ax.set_xlabel('F1 score (same type, within 1 s)')
     ax.grid(axis='y', visible=False)
-    ax.set_title('Per type, pooled (matched of MoCap)')
+    ax.set_title('F1 score per transition type, pooled')
     out['f1'] = k.f1.round(3).to_dict()
     ax = axes[1]
     m = events[(events.source == 'radar') & events.matched]
@@ -214,22 +188,6 @@ def transitions_figure(per_kind, events, path):
     ax.grid(axis='x', visible=False)
     ax.set_title(f'Timing: median absolute error {m.dt_s.abs().median():.2f} s')
     out['timing_median_s'] = m.dt_s.abs().median()
-    ax = axes[2]
-    mo = events[events.source == 'mocap']
-    g = mo.groupby(pd.cut(mo.offaxis_m, OFFAXIS_BINS), observed=True).agg(n=('matched', 'size'),
-                                                                         recall=('matched', 'mean'))
-    x = np.arange(len(g))
-    ax.bar(x, g.recall, 0.6, color=style.RADAR)
-    for i, r in enumerate(g.itertuples()):
-        ax.text(i, r.recall + 0.01, f'{r.recall:.2f}\nn={r.n}', ha='center', va='bottom', fontsize=8,
-                color=style.INK_2)
-    ax.set_xticks(x, [f'{iv.left:g}–{iv.right:g}' for iv in g.index])
-    ax.set_ylim(0, 1.18)
-    ax.set_xlabel('distance from the radar axis (m)')
-    ax.set_ylabel('share of MoCap transitions found')
-    ax.grid(axis='x', visible=False)
-    ax.set_title('By distance from the radar axis')
-    out['recall_by_offaxis'] = g.recall.round(2).tolist()
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return out
@@ -285,36 +243,36 @@ def peak_figure(events, mt, path, axis_max=3.0):
 
 
 def per_participant_table(ps, es, mt, person_of):
-    """per participant: mean posture F1 over their recordings, transition F1 pooled, mean absolute error of each
-    posture time (s) and of the mean peak speed (m/s) over their recordings"""
+    """per participant: mean posture F1 over their recordings, transition F1 pooled, and the mean absolute error of
+    each posture time and of the mean peak speed over their recordings, in % of their mean MoCap value"""
     ps, es, mt = (d.assign(person=person_of(d.rec)) for d in (ps, es, mt))
     rows = []
     for p, g in es.groupby('person'):
         row = dict(person=p, posture_f1=ps[ps.person == p].f1_mean.mean(),
                    transition_f1=2 * g.matched.sum() / (g.mocap_events.sum() + g.radar_events.sum()))
-        for post in POSTURE_NAMES:
-            h = mt[(mt.person == p) & (mt.metric == f'{post}_time')]
-            row[post] = 60 * (h.radar - h.mocap).abs().mean()
-        h = mt[(mt.person == p) & (mt.metric == 'peak_transition_doppler')]
-        row['peak'] = (h.radar - h.mocap).abs().mean()
+        for key, metric in [(post, f'{post}_time') for post in POSTURE_NAMES] + [('peak', 'peak_transition_doppler')]:
+            h = mt[(mt.person == p) & (mt.metric == metric)]
+            row[key] = 100 * (h.radar - h.mocap).abs().mean() / h.mocap.mean()
         rows.append(row)
     return pd.DataFrame(rows)
 
 
 def per_participant_figure(table, path):
-    """table: per_participant_table. One dot per participant (unlabelled); the median as a bar"""
+    """table: per_participant_table. One dot per participant (unlabelled); the median as a bar, median and mean
+    written below"""
     style.apply()
     rng = np.random.default_rng(0)
     panels = [('Scores', [('posture_f1', 'posture F1'), ('transition_f1', 'transition F1')], 'score', '{:.2f}',
                (0.65, 1.0)),
-              ('Posture time', [(p, p if p != 'floor' else 'on the floor') for p in POSTURE_NAMES],
-               'mean absolute error (s)', '{:.1f} s', (0, None)),
-              ('Peak speed', [('peak', 'mean peak speed')], 'mean absolute error (m/s)', '{:.2f}', (0, None))]
-    fig, axes = plt.subplots(1, 3, figsize=(14, 3.9), constrained_layout=True, gridspec_kw=dict(width_ratios=[1.2, 1.8, 1]))
+              ('Metric error', [(p, f'time {p}' if p != 'floor' else 'time on the floor') for p in POSTURE_NAMES]
+               + [('peak', 'mean peak speed')], "mean absolute error, % of the participant's MoCap value", '{:.1f}%',
+               (0, None))]
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True, gridspec_kw=dict(width_ratios=[1, 1.6]))
     out = {}
     for ax, (title, cols, xlabel, fmt, xlim) in zip(axes, panels):
         for i, (c, label) in enumerate(cols):
-            out[c] = (_strip(ax, i, table[c].values, rng, fmt), table[c].min(), table[c].max())
+            med, mean = _strip(ax, i, table[c].values, rng, fmt)
+            out[c] = dict(median=med, mean=mean, min=table[c].min(), max=table[c].max())
         ax.set_yticks(range(len(cols)), [label for _, label in cols])
         ax.set_ylim(len(cols) - 0.4, -0.6)
         ax.set_xlim(*xlim)

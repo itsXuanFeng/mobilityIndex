@@ -94,11 +94,7 @@ python scripts/evaluate_category3.py --workers 16              # needs Category 
 python scripts/calibrate_bout_rule.py --workers 16             # MoCap bout definition
 python scripts/evaluate_category2.py --workers 16              # needs Categories 1 and 3
 
-# 4. Localisation check: one recording per furniture layout
-python scripts/fit_radar_orientation.py --only person_1/scenario_1 person_10/scenario_2 person_5/scenario_3 \
-    person_12/scenario_5 person_15/scenario_4 person_22/scenario_6
-
-# 5. Figures of the docs (--docs copies them to docs/figures/)
+# 4. Figures of the docs (--docs copies them to docs/figures/)
 python scripts/plot_category1.py --docs
 python scripts/plot_category2.py --docs
 python scripts/plot_category3.py --docs
@@ -110,7 +106,7 @@ Optional analyses:
 |---|---|
 | `evaluate_personal_calibration.py` | personal calibration on top of the population calibration |
 | `check_mounting_height.py` | walking moments and the check of the radar's mounting height |
-| `fit_radar_position.py` | radar position against MoCap |
+| `fit_radar_position.py`, `fit_radar_orientation.py` | radar position and orientation against MoCap; localisation errors (`--only`, one recording per furniture layout) |
 | `plot_agreement.py`, `plot_bouts.py`, `plot_transitions.py` | radar and MoCap over time, per recording (`--only person_x/scenario_y`) |
 | `plot_per_person*.py` | signed error per participant |
 | `list_experiments.py` | every run so far: status, commit, inputs |

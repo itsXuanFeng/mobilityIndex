@@ -137,11 +137,11 @@ The radar finds slightly more bouts than MoCap, and its bouts are slightly short
 
 *Figure 3. The four metrics per recording, radar against MoCap, with the identity line. The number of bouts is slightly jittered, because both values are integers.*
 
-**Per participant.** Figure 4 shows the consistency across participants. The bout F1 score lies between 0.83 and 0.98, with a median of 0.92. The median errors per participant are 5.3% for the number of bouts, 6.8% for the mean duration, 12.7% for the variance and 8.2% for the fragmentation index. The variance shows the widest spread between participants.
+**Per participant.** Figure 4 shows the consistency across participants. The bout F1 score lies between 0.83 and 0.98, with a median and a mean of 0.92. The errors per participant have a median (mean) of 5.3% (5.1%) for the number of bouts, 6.8% (7.6%) for the mean duration, 12.7% (14.6%) for the variance and 8.2% (9.6%) for the fragmentation index. The variance shows the widest spread between participants.
 
 ![Figure 4](figures/c2_per_participant.png)
 
-*Figure 4. Results per participant, one dot each; the bar marks the median. Left: F1 score of the bout matching, pooled over the participant's recordings. Right: mean absolute error of each metric over the participant's recordings, in % of the participant's MoCap value.*
+*Figure 4. Results per participant, one dot each; the bar marks the median, and the median and mean are written below. Left: F1 score of the bout matching, pooled over the participant's recordings. Right: mean absolute error of each metric over the participant's recordings, in % of the participant's MoCap value.*
 
 **Additional checks.** Figure 5 shows the first two of three further checks.
 

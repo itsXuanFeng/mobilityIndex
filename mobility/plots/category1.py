@@ -169,11 +169,13 @@ def per_participant_figure(table, path):
             ax.plot(x, y, 'o', ms=6, color=style.RADAR, mec=style.SURFACE, mew=0.8, alpha=0.9, zorder=2)
             med = np.median(x)
             ax.plot([med, med], [i - 0.3, i + 0.3], color=style.INK, lw=2, zorder=3)
-            ax.text(med, i + 0.33, f'median {med:.2f}' if xlim[1] == 1.0 else f'median {med:.1f}%', ha='center',
-                    va='bottom', fontsize=8, color=style.INK_2)
-            out[col] = (med, x.min(), x.max())
+            mean = np.mean(x)
+            ax.text(med, i + 0.33, f'median {med:.2f}, mean {mean:.2f}' if xlim[1] == 1.0
+                    else f'median {med:.1f}%, mean {mean:.1f}%', ha='center',
+                    va='top', fontsize=8, color=style.INK_2)
+            out[col] = dict(median=med, mean=mean, min=x.min(), max=x.max())
         ax.set_yticks(range(len(rows)), [label for _, label in rows])
-        ax.set_ylim(-0.6, len(rows) - 0.25)
+        ax.set_ylim(-0.6, len(rows) - 0.1)
         ax.set_xlim(*xlim)
         if xlim[1] is None:
             ax.set_xlim(0, max(table[c].max() for c, _ in rows) * 1.08)

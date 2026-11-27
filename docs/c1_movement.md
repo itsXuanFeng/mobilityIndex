@@ -118,12 +118,12 @@ The evaluation covers 148 recordings of 27 participants, with about 51,000 epoch
 
 **Per participant.** Figure 4 shows how consistent the results are across participants.
 
-- **Per epoch.** The AUC lies between 0.94 and 0.98 for every participant, with a median of 0.97. The median F1 score is 0.90; the lowest is 0.84.
-- **Per recording.** The median error of active time is 5.7% of the participant's MoCap value, and that of the energy is 5.5%. For most participants, both errors stay below about 10%. The largest errors, up to 15% for active time and 19% for the energy, concern a few participants only.
+- **Per epoch.** The AUC lies between 0.94 and 0.98 for every participant, with a median and a mean of 0.97. The F1 score has a median and a mean of 0.90; the lowest is 0.84.
+- **Per recording.** The error of active time has a median of 5.7% of the participant's MoCap value and a mean of 6.9%; for the energy, 5.5% and 6.9%. For most participants, both errors stay below about 10%. The largest errors, up to 15% for active time and 19% for the energy, concern a few participants only.
 
 ![Figure 4](figures/c1_per_participant.png)
 
-*Figure 4. Results per participant, one dot each; the bar marks the median. Left: AUC and F1 of the active / inactive calls per epoch. Right: mean absolute error of active time and of the converted energy over the participant's recordings, in % of the participant's MoCap value.*
+*Figure 4. Results per participant, one dot each; the bar marks the median, and the median and mean are written below. Left: AUC and F1 of the active / inactive calls per epoch. Right: mean absolute error of active time and of the converted energy over the participant's recordings, in % of the participant's MoCap value.*
 
 **Failure modes.** A breakdown by scripted activity (not shown) locates the remaining errors. The radar under-calls walking far from the radar, such as walking to the kitchen or leaving the room. It over-calls small settling movements in bed. Precise time alignment between radar and MoCap also proved essential: an earlier analysis underestimated the radar because of a misalignment.
 

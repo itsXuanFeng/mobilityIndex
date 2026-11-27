@@ -123,57 +123,65 @@ where $v_{j,r}$ is the radial velocity of joint $j$ with respect to the radar.
 
 The posture results cover the same 148 recordings of 27 participants as Categories 1 and 2. All radar results are leave-one-subject-out. The MoCap reference itself reproduces almost all scripted posture changes.
 
-**Localisation.** The localisation check uses 16,096 frames from six recordings, one per furniture layout (Figure 1).
+**Localisation.** Against the nearest MoCap joint, the radar positions have a median horizontal error of 14 cm. With the angle of arrival, the median height error is 9 cm, against 53 cm from the range alone; away from the radar axis, the range alone misjudges the height by more than a metre.
 
-- **Horizontal position.** The median horizontal error between the radar's nearest moving reflection and the nearest MoCap joint is 14 cm, about the size of a body part.
-- **Height.** With the angle of arrival, the median height error is 9 cm. From the range alone, it is 53 cm. The difference grows with the distance from the radar axis: from range alone the error exceeds one metre beyond 1.5 m from the axis, while with the angle it stays between 6 and 25 cm.
-- **Orientation.** The fitted orientation of the radar is the same in every recording.
+**Example recording.** Figure 1 shows how the heights translate into postures in one recording. The upper height follows the MoCap head height closely while the person lies. It reads lower while the person stands or sits away from the radar axis, by an amount that depends on the posture; the posture model accounts for this. The radar matches 10 of MoCap's 12 transitions with the same type. After the first sit-down, for instance, it briefly decodes lying before sitting, so that transition has no match of the same type.
 
-![Figure 1](figures/c3_localisation.png)
+![Figure 1](figures/c3_timeline.png)
 
-*Figure 1. Median absolute error of the height of the radar's nearest moving reflection against the nearest MoCap joint, by the distance of the joint from the radar axis. Grey: height from the range alone, as if the reflection lay directly below the radar. Orange: height from the range and the angle of arrival.*
+*Figure 1. One recording. Top: posture of both sensors and their transitions; hollow markers have no match of the same type in the other sensor. Bottom: the radar's upper and median heights of the person and the MoCap head height. Gaps are outside the evaluation window.*
 
-**Example recording.** Figure 2 shows how the heights translate into postures in one recording. The upper height follows the MoCap head height closely while the person lies. It reads lower while the person stands or sits away from the radar axis, by an amount that depends on the posture; the posture model accounts for this. The radar matches 10 of MoCap's 12 transitions with the same type. After the first sit-down, for instance, it briefly decodes lying before sitting, so that transition has no match of the same type.
+**Posture.** Over all 50,874 epochs, the radar assigns the MoCap posture in 97.4% of the cases (Figure 2, epoch counts). Per MoCap posture, the radar agrees in 98.0% of the standing, 95.4% of the sitting, 98.2% of the lying and 99.3% of the floor epochs. The most frequent confusions are between sitting and standing or lying, each about 2% of the sitting epochs. Per recording, the F1 score has a median (mean) of 0.99 (0.98) for standing, 0.97 (0.96) for sitting, 0.98 (0.98) for lying and 0.97 (0.96) for the floor. Three recordings have a low floor score. In one, MoCap records no floor time while the radar decodes about half a minute on the floor. In the other two, the radar's floor episode lasts longer than MoCap's.
 
-![Figure 2](figures/c3_timeline.png)
+![Figure 2](figures/c3_posture.png)
 
-*Figure 2. One recording. Top: posture of both sensors and their transitions; hollow markers have no match of the same type in the other sensor. Bottom: the radar's upper and median heights of the person and the MoCap head height. Gaps are outside the evaluation window.*
+*Figure 2. Left: confusion matrix of the posture per epoch, MoCap against radar, pooled over all recordings, in numbers of epochs; the row labels give each MoCap posture's total, and the shading its share. Right: F1 score of each posture per recording, one dot each; the bar marks the median.*
 
-**Posture.** Over all epochs, the radar assigns the MoCap posture in 97.4% of the cases (Figure 3). The diagonal of the confusion matrix ranges from 95.4% for sitting to 99.3% for the floor. The most frequent confusions are between sitting and standing or lying, each about 2% of the sitting epochs. Per recording, the median F1 score is 0.99 for standing, 0.97 for sitting, 0.98 for lying and 0.97 for the floor. Three recordings have a low floor score. In one, MoCap records no floor time while the radar decodes about half a minute on the floor. In the other two, the radar's floor episode lasts longer than MoCap's.
+**Time in each posture.** The time in each posture closely follows MoCap (Figure 3). Per recording, the mean absolute errors and biases are, with the error in % of the mean MoCap time:
 
-![Figure 3](figures/c3_posture.png)
+| Posture | Mean MoCap time | Mean absolute error | Bias (radar − MoCap) |
+|---|---|---|---|
+| Standing | 140 s | 3.5 s (2.5%) | −0.8 s (−0.5%) |
+| Sitting | 96 s | 4.4 s (4.5%) | −1.2 s (−1.2%) |
+| Lying | 85 s | 2.3 s (2.7%) | +0.5 s (+0.6%) |
+| Floor | 23 s | 1.6 s (7.0%) | +1.4 s (+6.3%) |
 
-*Figure 3. Left: posture per epoch, MoCap against radar, pooled over all recordings, in % of each MoCap posture. Right: F1 score of each posture per recording, one dot each; the bar marks the median.*
+The floor has the largest relative error, because its episodes are short: a few seconds of difference weigh more. The radar tends to keep the floor posture slightly longer than MoCap.
 
-**Time in each posture.** The time in each posture closely follows MoCap (Figure 4). The mean absolute error per recording is 3.5 s for standing, 4.4 s for sitting, 2.3 s for lying and 1.6 s for the floor. The median MoCap times are 136 s, 94 s, 82 s and 23 s, so the errors amount to 3–7% of the time in a posture. The biases stay within 1.5 s.
+![Figure 3](figures/c3_posture_time.png)
 
-![Figure 4](figures/c3_posture_time.png)
+*Figure 3. Time in each posture per recording, radar against MoCap, with the identity line.*
 
-*Figure 4. Time in each posture per recording, radar against MoCap, with the identity line.*
-
-**Transitions.** Of the 1,762 MoCap transitions, the radar matches 1,597 with the same type within one second, a pooled F1 score of 0.91 (Figure 5). The median F1 score per recording is 0.92.
+**Transitions.** Of the 1,762 MoCap transitions, the radar matches 1,597 with the same type within one second, a pooled F1 score of 0.91 (Figure 4). The median F1 score per recording is 0.92.
 
 - **Per type.** The F1 score is between 0.91 and 0.93 for all types except getting up from the floor (0.84).
 - **Timing.** The median absolute timing error of matched transitions is 0.20 s.
-- **Distance from the axis.** The share of transitions found stays between 0.88 and 0.93 up to 3 m from the radar axis.
 
 The posture model also performs as well in a furniture layout that was left out of its calibration.
 
-![Figure 5](figures/c3_transitions.png)
+![Figure 4](figures/c3_transitions.png)
 
-*Figure 5. Left: F1 score per transition type, pooled, with the number of MoCap transitions matched. Middle: timing error of the matched transitions, radar − MoCap. Right: share of MoCap transitions found by the radar, by the distance of the person from the radar axis.*
+*Figure 4. Left: F1 score per transition type, pooled over all recordings. Right: timing error of the matched transitions, radar − MoCap.*
 
-**Peak speed.** For the 1,069 matched transitions of the counted types, the radar's peak radial speed agrees with MoCap's: the median absolute error is 0.12 m/s and the median bias −0.01 m/s (Figure 6). Below 1 m/s, the two agree without bias. Above 1.5 m/s of MoCap speed, which concerns about one transition in ten, the radar reads lower. These fast MoCap peaks come from a single joint, so some may be brief tracking errors. This tail makes the radar's mean peak speed per recording, the metric, lower than MoCap's: mean absolute error 0.16 m/s, bias −0.11 m/s.
+**Peak speed.** For the 1,069 matched transitions of the counted types, the radar's peak radial speed agrees with MoCap's: the median absolute error is 0.12 m/s and the median bias −0.01 m/s (Figure 5). Below 1 m/s, the two agree without bias. Above 1.5 m/s of MoCap speed, which concerns about one transition in ten, the radar reads lower. These fast MoCap peaks come from a single joint, so some may be brief tracking errors. This tail makes the radar's mean peak speed per recording, the metric, lower than MoCap's: mean absolute error 0.16 m/s, bias −0.11 m/s.
 
-![Figure 6](figures/c3_peak.png)
+![Figure 5](figures/c3_peak.png)
 
-*Figure 6. Peak radial speed. Left: per matched transition of the counted types (sit to stand, stand to sit, lie to sit); values above 3 m/s are drawn on the edge. Right: the metric, the mean peak speed of a recording's transitions, radar against MoCap.*
+*Figure 5. Peak radial speed. Left: per matched transition of the counted types (sit to stand, stand to sit, lie to sit); values above 3 m/s are drawn on the edge. Right: the metric, the mean peak speed of a recording's transitions, radar against MoCap.*
 
-**Per participant.** Figure 7 shows the consistency across participants. The posture F1 score has a median of 0.97, and is above 0.88 for every participant. The transition F1 score has a median of 0.92; three participants score below 0.75. The median errors per participant are a few seconds for each posture time and 0.13 m/s for the peak speed. Single participants stand out with larger posture-time errors, up to 20 s for standing.
+**Per participant.** Figure 6 shows the consistency across participants. The posture F1 score has a median and a mean of 0.97, and is above 0.88 for every participant. The transition F1 score has a median of 0.92 and a mean of 0.90; three participants score below 0.75. In % of the participant's MoCap value, the errors have a median (mean) of:
 
-![Figure 7](figures/c3_per_participant.png)
+- time standing: 2.6% (2.5%);
+- time sitting: 4.3% (4.5%);
+- time lying: 2.2% (2.7%);
+- time on the floor: 5.6% (9.0%);
+- mean peak speed: 13.0% (14.0%).
 
-*Figure 7. Results per participant, one dot each; the bar marks the median. Left: mean posture F1 score and pooled transition F1 score. Middle: mean absolute error of each posture time. Right: mean absolute error of the mean peak speed.*
+The floor time has a low median but a higher mean, because of two participants with errors above 50%. In their recordings, the radar keeps the floor posture much longer than MoCap, or decodes floor time where MoCap has none. The peak speed has the largest typical error, in line with the per-recording results.
+
+![Figure 6](figures/c3_per_participant.png)
+
+*Figure 6. Results per participant, one dot each; the bar marks the median, and the median and mean are written below. Left: mean posture F1 score and pooled transition F1 score. Right: mean absolute error of each posture time and of the mean peak speed over the participant's recordings, in % of the participant's MoCap value.*
 
 **Calibration data.** About one hour of MoCap recordings is sufficient to calibrate the posture model.
 

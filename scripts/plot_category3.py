@@ -1,13 +1,13 @@
 """
 Category 3 result figures (mobility/plots/category3.py), from the latest category3 run (events.csv, metrics.csv,
-posture_confusion.csv, posture_scores.csv, event_scores.csv, per_kind.csv), the category1 thresholds (the movement gate
-of the example recording) and errors.csv of the latest radar_orientation run (scripts/fit_radar_orientation.py).
+posture_confusion.csv, posture_scores.csv, event_scores.csv, per_kind.csv) and the category1 thresholds (the movement
+gate of the example recording).
 The timeline rebuilds the postures of one recording as scripts/plot_transitions.py does.
 
     python scripts/plot_category3.py            # to its run folder
     python scripts/plot_category3.py --docs     # also copies the figures to docs/figures/ (public docs)
 
-Writes c3_localisation.png, c3_timeline.png, c3_posture.png, c3_posture_time.png, c3_transitions.png, c3_peak.png and
+Writes c3_timeline.png, c3_posture.png, c3_posture_time.png, c3_transitions.png, c3_peak.png and
 c3_per_participant.png, and prints the numbers they show.
 """
 import argparse
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mobility.config import FPS, REPO  # noqa: E402
 from mobility.experiment import add_run_args, latest, run  # noqa: E402
 from mobility.io.recordings import parse_recording  # noqa: E402
-from mobility.plots.category3 import (held_posture, localisation_figure, peak_figure, per_participant_figure,  # noqa: E402
+from mobility.plots.category3 import (held_posture, peak_figure, per_participant_figure,  # noqa: E402
                                       per_participant_table, posture_figure, posture_time_figure, timeline_figure,
                                       transitions_figure)
 from mobility.posture import (decode_postures, posture_rules, radar_height, radar_median_height,  # noqa: E402
@@ -61,13 +61,11 @@ if __name__ == '__main__':
         ps = pd.read_csv(latest('category3', 'posture_scores.csv'))
         es = pd.read_csv(latest('category3', 'event_scores.csv'))
         pk = pd.read_csv(latest('category3', 'per_kind.csv'))
-        loc = pd.read_csv(latest('radar_orientation', 'errors.csv'))
-        names = ('localisation', 'timeline', 'posture', 'posture_time', 'transitions', 'peak', 'per_participant')
+        names = ('timeline', 'posture', 'posture_time', 'transitions', 'peak', 'per_participant')
         paths = {k: os.path.join(run_dir, f'c3_{k}.png') for k in names}
-        print('localisation:', localisation_figure(loc, paths['localisation']))
         print('timeline:', timeline_figure(*timeline_inputs(args.example, events), paths['timeline']))
         print('posture:', posture_figure(conf, ps, paths['posture']))
-        print('posture time (MAE s, bias s, MoCap median s):', posture_time_figure(mt, paths['posture_time']))
+        print('posture time:', posture_time_figure(mt, paths['posture_time']))
         print('transitions:', transitions_figure(pk, events, paths['transitions']))
         print('peak:', peak_figure(events, mt, paths['peak']))
         table = per_participant_table(ps, es, mt, person_of)

@@ -26,14 +26,15 @@ METRICS = [  # metric, title, unit
 ]
 
 
-def _strip(ax, i, x, rng, label_fmt, horizontal=True):
-    """one row of dots (one per participant / recording) at position i, with the median as a bar"""
+def _strip(ax, i, x, rng, fmt):
+    """one row of dots (one per participant) at position i, with the median as a bar; median and mean written below"""
     y = i + rng.uniform(-0.15, 0.15, len(x))
     ax.plot(x, y, 'o', ms=6, color=style.RADAR, mec=style.SURFACE, mew=0.8, zorder=2)
-    med = np.median(x)
+    med, mean = np.median(x), np.mean(x)
     ax.plot([med, med], [i - 0.3, i + 0.3], color=style.INK, lw=2, zorder=3)
-    ax.text(med, i + 0.33, label_fmt(med), ha='center', va='top', fontsize=8, color=style.INK_2)
-    return med
+    ax.text(med, i + 0.33, f'median {fmt.format(med)}, mean {fmt.format(mean)}', ha='center', va='top', fontsize=8,
+            color=style.INK_2)
+    return dict(median=med, mean=mean)
 
 
 def formation_figure(level, valid, candidates, radar_bout, mocap_bout, transitions_s, thresholds, path, length=100,
@@ -204,7 +205,7 @@ def per_participant_figure(table, path):
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), constrained_layout=True, gridspec_kw=dict(width_ratios=[1, 2.3]))
     out = {}
     ax = axes[0]
-    out['bout_f1'] = _strip(ax, 0, table.bout_f1.values, rng, lambda v: f'median {v:.2f}')
+    out['bout_f1'] = _strip(ax, 0, table.bout_f1.values, rng, '{:.2f}')
     ax.set_yticks([0], ['bout F1'])
     ax.set_ylim(-0.6, 0.7)
     ax.invert_yaxis()
@@ -214,7 +215,7 @@ def per_participant_figure(table, path):
     ax.set_title('Bout matching')
     ax = axes[1]
     for i, (k, _, _) in enumerate(METRICS):
-        out[k] = _strip(ax, i, table[k].values, rng, lambda v: f'median {v:.1f}%')
+        out[k] = _strip(ax, i, table[k].values, rng, '{:.1f}%')
     ax.set_yticks(range(len(METRICS)), [n.lower() for _, n, _ in METRICS])
     ax.set_ylim(-0.6, len(METRICS) - 0.25)
     ax.invert_yaxis()
